@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>benchjack // hackability scanner</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header id="header">
+    <div class="header-left">
+      <a href="/" id="home-link"><h1>benchjack</h1></a>
+      <span class="subtitle">hackability scanner</span>
+    </div>
+    <div class="header-right">
+      <button id="runs-btn" class="btn-view-toggle">Runs</button>
+      <button id="view-toggle-btn" class="btn-view-toggle">View Logs</button>
+      <span id="status-badge" class="badge badge-idle">IDLE</span>
+    </div>
+  </header>
+
+  <!-- Runs panel (slide-down overlay) -->
+  <section id="runs-panel" style="display:none">
+    <div class="runs-panel-header">
+      <h2>Previous Runs</h2>
+      <button id="runs-close-btn" class="runs-close">&times;</button>
+    </div>
+    <div id="runs-list" class="runs-list">
+      <div class="runs-empty">No previous runs found</div>
+    </div>
+  </section>
+
+  <!-- Input bar -->
+  <section id="input-bar">
+    <form id="audit-form">
+      <label for="target-input">Benchmark</label>
+      <input
+        id="target-input"
+        type="text"
+        placeholder="Local path, GitHub URL, or owner/repo"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button type="button" id="backend-btn" class="cycle-btn" data-state="claude">claude code</button>
+      <button type="button" id="sandbox-btn" class="cycle-btn" data-state="nosandbox">no sandbox</button>
+      <button id="start-btn" type="submit">Start Audit</button>
+      <button id="hack-btn" type="button" class="btn-hack">Just Hack It!</button>
+      <button id="continue-btn" type="button" class="btn-continue" style="display:none">Continue</button>
+      <button id="cancel-btn" type="button" class="btn-cancel" style="display:none">Cancel</button>
+    </form>
+  </section>
+
+  <!-- ==================== Dashboard View (default) ==================== -->
+  <section id="dashboard-view">
+    <div id="progress-section">
+      <!-- Audit mode progress bar -->
+      <div id="progress-bar" class="progress-bar-inner">
+        <div class="progress-segment pending" data-phase="setup">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Setup</span>
+        </div>
+        <div class="progress-segment pending" data-phase="recon">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Recon</span>
+        </div>
+        <div class="progress-segment pending" data-phase="vuln_scan">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Vuln Scan</span>
+        </div>
+        <div class="progress-segment pending" data-phase="poc">
+          <div class="segment-fill"></div>
+          <span class="segment-label">PoC</span>
+        </div>
+        <div class="progress-segment pending" data-phase="report">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Report</span>
+        </div>
+      </div>
+      <!-- Hack mode progress bar -->
+      <div id="hack-progress-bar" class="progress-bar-inner" style="display:none">
+        <div class="progress-segment pending" data-phase="hack">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Hack</span>
+        </div>
+        <div class="progress-segment pending" data-phase="verify">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Verify &amp; Improve</span>
+        </div>
+      </div>
+    </div>
+    <div id="scoreboard-section">
+      <table id="scoreboard-table">
+        <thead>
+          <tr>
+            <th class="col-task">Task</th>
+            <th class="col-path-spacer" aria-hidden="true"></th>
+            <th class="col-vuln" data-vuln="V1">
+              <div class="vuln-header"><span class="vuln-id">V1</span><span class="vuln-short">Isolation</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V2">
+              <div class="vuln-header"><span class="vuln-id">V2</span><span class="vuln-short">Answers</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V3">
+              <div class="vuln-header"><span class="vuln-id">V3</span><span class="vuln-short">RCE</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V4">
+              <div class="vuln-header"><span class="vuln-id">V4</span><span class="vuln-short">LLM Judge</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V5">
+              <div class="vuln-header"><span class="vuln-id">V5</span><span class="vuln-short">Matching</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V6">
+              <div class="vuln-header"><span class="vuln-id">V6</span><span class="vuln-short">Logic</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V7">
+              <div class="vuln-header"><span class="vuln-id">V7</span><span class="vuln-short">Trust</span></div>
+            </th>
+            <th class="col-vuln" data-vuln="V8">
+              <div class="vuln-header"><span class="vuln-id">V8</span><span class="vuln-short">Perms</span></div>
+            </th>
+            <th class="col-poc">
+              <div class="vuln-header"><span class="vuln-id">Status</span></div>
+            </th>
+          </tr>
+        </thead>
+        <tbody id="scoreboard-body"></tbody>
+      </table>
+      <div id="scoreboard-empty">
+        <p id="scoreboard-empty-text">Run an audit to see results</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tooltip for scoreboard dots -->
+  <div id="tooltip" style="display:none">
+    <div id="tooltip-content"></div>
+  </div>
+
+  <!-- ==================== Detail View (old UI, hidden by default) ==================== -->
+  <div id="detail-view" style="display:none">
+
+  <!-- Phase timeline -->
+  <section id="timeline">
+    <!-- Audit phases (hidden in hack mode) -->
+    <div class="phase pending" data-phase="setup" data-mode="audit">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Setup</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="audit"></div>
+    <div class="phase pending" data-phase="recon" data-mode="audit">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Recon</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="audit"></div>
+    <div class="phase pending" data-phase="vuln_scan" data-mode="audit">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Vuln Scan</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="audit"></div>
+    <div class="phase pending" data-phase="poc" data-mode="audit">
+      <div class="phase-dot"></div>
+      <span class="phase-label">PoC</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="audit"></div>
+    <div class="phase pending" data-phase="report" data-mode="audit">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Report</span>
+      <span class="phase-time"></span>
+    </div>
+    <!-- Hack phases (hidden in audit mode) -->
+    <div class="phase pending" data-phase="hack" data-mode="hack" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Hack</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="hack" style="display:none"></div>
+    <div class="phase pending" data-phase="verify" data-mode="hack" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">Verify &amp; Improve</span>
+      <span class="phase-time"></span>
+    </div>
+  </section>
+
+  <!-- Main content area -->
+  <main id="content">
+    <!-- Left panel: phase tabs + output/summary view -->
+    <section id="log-panel">
+      <!-- Tab bar -->
+      <div class="panel-header">
+        <div id="phase-tabs" class="phase-tabs">
+          <button class="phase-tab active" data-tab="setup">Setup</button>
+          <button class="phase-tab" data-tab="recon">Recon</button>
+          <button class="phase-tab" data-tab="vuln_scan">Vuln Scan</button>
+          <button class="phase-tab" data-tab="poc">PoC</button>
+          <button class="phase-tab" data-tab="report">Report</button>
+          <button class="phase-tab hack-tab" data-tab="hack" style="display:none">Hack</button>
+          <button class="phase-tab hack-tab" data-tab="verify" style="display:none">Verify</button>
+        </div>
+        <div class="view-controls">
+          <div class="view-toggle" id="view-toggle">
+            <button class="view-btn active" data-view="output">Output</button>
+            <button class="view-btn" data-view="summary">Summary</button>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="autoscroll" checked> Auto-scroll
+          </label>
+        </div>
+      </div>
+
+      <!-- Tab panes — each has an output container and a summary container -->
+      <div id="tab-setup" class="tab-pane active">
+        <div class="phase-output active" data-phase="setup"></div>
+        <div class="phase-summary" data-phase="setup">
+          <div class="phase-markdown" data-phase="setup"></div>
+        </div>
+      </div>
+      <div id="tab-recon" class="tab-pane">
+        <div class="phase-output" data-phase="recon"></div>
+        <div class="phase-summary" data-phase="recon">
+          <div class="phase-markdown" data-phase="recon"></div>
+        </div>
+      </div>
+      <div id="tab-vuln_scan" class="tab-pane">
+        <div class="phase-output" data-phase="vuln_scan"></div>
+        <div class="phase-summary" data-phase="vuln_scan">
+          <div class="phase-markdown" data-phase="vuln_scan"></div>
+        </div>
+      </div>
+      <div id="tab-poc" class="tab-pane">
+        <div class="phase-output" data-phase="poc"></div>
+        <div class="phase-summary" data-phase="poc">
+          <div class="phase-markdown" data-phase="poc"></div>
+        </div>
+      </div>
+      <div id="tab-report" class="tab-pane">
+        <div class="phase-output" data-phase="report"></div>
+        <div class="phase-summary" data-phase="report">
+          <div class="phase-markdown" data-phase="report"></div>
+        </div>
+      </div>
+      <div id="tab-hack" class="tab-pane">
+        <div class="phase-output" data-phase="hack"></div>
+        <div class="phase-summary" data-phase="hack">
+          <div class="phase-markdown" data-phase="hack"></div>
+        </div>
+      </div>
+      <div id="tab-verify" class="tab-pane">
+        <div class="phase-output" data-phase="verify"></div>
+        <div class="phase-summary" data-phase="verify">
+          <div class="phase-markdown" data-phase="verify"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  </div><!-- /detail-view -->
+
+  <!-- Hidden findings store — keeps JS references valid; panel removed from UI -->
+  <div style="display:none" aria-hidden="true">
+    <span id="findings-count"></span>
+    <select id="severity-filter"></select>
+    <div id="findings-list"></div>
+  </div>
+
+  <!-- Summary bar -->
+  <footer id="summary-bar">
+    <div id="summary-stats">
+      <span class="stat" id="stat-critical">0 Critical</span>
+      <span class="stat" id="stat-high">0 High</span>
+      <span class="stat" id="stat-medium">0 Medium</span>
+      <span class="stat" id="stat-low">0 Low</span>
+      <span class="stat-separator">|</span>
+      <span class="stat" id="stat-total">0 Total</span>
+    </div>
+    <div id="summary-message"></div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

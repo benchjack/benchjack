@@ -1,0 +1,484 @@
+rules:
+  # ============================================================
+  # V1: No Isolation Between Agent and Evaluator
+  # ============================================================
+
+  - id: benchjack-v1-shared-filesystem-read
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: pathlib.Path($PATH).read_text(...)
+          - pattern: pathlib.Path($PATH).read_bytes(...)
+          - pattern: |
+              with open($PATH, ...) as $F:
+                  ...
+    message: >
+      [V1] File read that may consume agent-controlled data. If $PATH points
+      into an agent-writable directory the evaluator trusts untrusted output.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V1
+      category: isolation
+      description: "Evaluator reads from potentially agent-writable path"
+
+  - id: benchjack-v1-shared-volume-mount
+    patterns:
+      - pattern-either:
+          - pattern: "...-v $SRC:$DST..."
+          - pattern: "...--mount ...$SRC...$DST..."
+    message: >
+      [V1] Docker volume mount detected. If both agent and evaluator access
+      this mount, there is no filesystem isolation.
+    languages: [generic]
+    severity: WARNING
+    metadata:
+      vulnerability: V1
+      category: isolation
+
+  - id: benchjack-v1-pytest-in-agent-container
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(["pytest", ...], ...)
+          - pattern: subprocess.run("pytest ...", ...)
+          - pattern: os.system("pytest ...")
+          - pattern: subprocess.Popen(["pytest", ...], ...)
+    message: >
+      [V1/V7] Running pytest via subprocess. If this runs inside an
+      agent-controlled container, test results can be faked.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V1
+      category: isolation
+
+  # ============================================================
+  # V2: Answers Shipped With the Test
+  # ============================================================
+
+  - id: benchjack-v2-answer-in-config
+    patterns:
+      - pattern-either:
+          - pattern: |
+              {..., "answer": $ANS, ...}
+          - pattern: |
+              {..., "expected": $ANS, ...}
+          - pattern: |
+              {..., "gold": $ANS, ...}
+          - pattern: |
+              {..., "reference": $ANS, ...}
+          - pattern: |
+              {..., "ground_truth": $ANS, ...}
+          - pattern: |
+              {..., "solution": $ANS, ...}
+    message: >
+      [V2] Answer/reference data found in config dictionary. If this is
+      accessible to the agent at runtime, answers are leaked.
+    languages: [python, json]
+    severity: WARNING
+    metadata:
+      vulnerability: V2
+      category: answer-leak
+
+  - id: benchjack-v2-gold-file-load
+    patterns:
+      - pattern-either:
+          - pattern: json.load($F)
+          - pattern: json.loads($S)
+          - pattern: yaml.safe_load($F)
+          - pattern: yaml.load($F, ...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: ".*(gold|answer|expected|reference|ground_truth|solution).*"
+    message: >
+      [V2] Loading a file whose name suggests it contains answers. If this
+      file is accessible to the agent, answers are leaked.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V2
+      category: answer-leak
+
+  # ============================================================
+  # V3: Remote Code Execution on Untrusted Input
+  # ============================================================
+
+  - id: benchjack-v3-eval-on-variable
+    patterns:
+      - pattern: eval($X)
+      - pattern-not: eval("...")
+    message: >
+      [V3] eval() called on a variable. If the variable contains
+      agent-controlled data, this is remote code execution.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-exec-on-variable
+    patterns:
+      - pattern: exec($X)
+      - pattern-not: exec("...")
+    message: >
+      [V3] exec() called on a variable. If the variable contains
+      agent-controlled data, this is remote code execution.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-subprocess-shell-true
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run($CMD, ..., shell=True, ...)
+          - pattern: subprocess.call($CMD, ..., shell=True, ...)
+          - pattern: subprocess.Popen($CMD, ..., shell=True, ...)
+          - pattern: subprocess.check_output($CMD, ..., shell=True, ...)
+          - pattern: subprocess.check_call($CMD, ..., shell=True, ...)
+    message: >
+      [V3] subprocess with shell=True. If $CMD includes agent-controlled
+      data, this is command injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-os-system
+    pattern: os.system($CMD)
+    message: >
+      [V3] os.system() always uses a shell. If $CMD includes
+      agent-controlled data, this is command injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-pickle-load
+    patterns:
+      - pattern-either:
+          - pattern: pickle.load(...)
+          - pattern: pickle.loads(...)
+          - pattern: cPickle.load(...)
+          - pattern: cPickle.loads(...)
+    message: >
+      [V3] Pickle deserialization. If the input is agent-controlled,
+      this allows arbitrary code execution.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-yaml-unsafe-load
+    patterns:
+      - pattern: yaml.load($X)
+      - pattern-not: yaml.load($X, Loader=yaml.SafeLoader)
+      - pattern-not: yaml.load($X, Loader=yaml.CSafeLoader)
+    message: >
+      [V3] yaml.load() without SafeLoader. If the input is agent-controlled,
+      this allows arbitrary code execution.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  - id: benchjack-v3-js-eval
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: new Function($X)
+          - pattern: setTimeout($X, ...)
+          - pattern: setInterval($X, ...)
+      - pattern-not: eval("...")
+      - pattern-not: new Function("...")
+    message: >
+      [V3] JavaScript eval or equivalent on dynamic input. If the input
+      is agent-controlled (e.g., DOM content), this is code execution.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      vulnerability: V3
+      category: code-execution
+
+  # ============================================================
+  # V4: LLM Judges Without Input Sanitization
+  # ============================================================
+
+  - id: benchjack-v4-fstring-in-llm-prompt
+    patterns:
+      - pattern-either:
+          - pattern: |
+              f"...{$VAR}..."
+          - pattern: |
+              "...{}...".format($VAR)
+          - pattern: |
+              "...{$KEY}...".format(**$DICT)
+          - pattern: |
+              $TEMPLATE.format($VAR)
+          - pattern: |
+              $TEMPLATE % $VAR
+    message: >
+      [V4] String interpolation that may be inserting agent output into
+      an LLM judge prompt. Check whether $VAR contains agent-controlled data
+      and whether there are delimiters or escaping to prevent prompt injection.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V4
+      category: prompt-injection
+      note: "High false-positive rate — verify proximity to LLM API calls"
+
+  - id: benchjack-v4-openai-chat-with-user-content
+    patterns:
+      - pattern: |
+          {..., "role": "user", "content": $CONTENT, ...}
+      - metavariable-pattern:
+          metavariable: $CONTENT
+          pattern-not: "..."
+    message: >
+      [V4] Dynamic content in OpenAI chat message. If $CONTENT includes
+      agent output, the judge is vulnerable to prompt injection.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V4
+      category: prompt-injection
+
+  # ============================================================
+  # V5: Weak String Matching
+  # ============================================================
+
+  - id: benchjack-v5-substring-containment
+    patterns:
+      - pattern-either:
+          - pattern: $ANSWER in $RESPONSE
+          - pattern: $RESPONSE.find($ANSWER)
+          - pattern: $ANSWER in $RESPONSE.lower()
+          - pattern: $RESPONSE.lower().find($ANSWER)
+          - pattern: $RESPONSE.__contains__($ANSWER)
+    message: >
+      [V5] Substring containment check for answer matching. An agent can
+      dump all possible answers and the correct one will be "in" the response.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V5
+      category: weak-matching
+
+  - id: benchjack-v5-regex-broad-match
+    patterns:
+      - pattern-either:
+          - pattern: re.search($PAT, $TEXT)
+          - pattern: re.match($PAT, $TEXT)
+          - pattern: re.findall($PAT, $TEXT)
+    message: >
+      [V5] Regex-based answer matching. Check whether the pattern is
+      specific enough or could match overly broad responses.
+    languages: [python]
+    severity: INFO
+    metadata:
+      vulnerability: V5
+      category: weak-matching
+      note: "Manual review required — check regex specificity"
+
+  # ============================================================
+  # V6: Evaluation Logic Gaps
+  # ============================================================
+
+  - id: benchjack-v6-except-returns-pass
+    patterns:
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except ...:
+                  return 1.0
+          - pattern: |
+              try:
+                  ...
+              except ...:
+                  return True
+          - pattern: |
+              try:
+                  ...
+              except ...:
+                  return 1
+          - pattern: |
+              try:
+                  ...
+              except:
+                  return 1.0
+          - pattern: |
+              try:
+                  ...
+              except:
+                  return True
+    message: >
+      [V6] Exception handler returns a passing score. An agent can trigger
+      the exception path to get a free pass.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V6
+      category: logic-gap
+
+  - id: benchjack-v6-role-only-check
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if $MSG["role"] == "assistant":
+                  return ...
+          - pattern: |
+              if $MSGS[-1]["role"] == "assistant":
+                  return ...
+    message: >
+      [V6] Validation checks only the message role, not the content.
+      Any assistant message passes regardless of what it says.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V6
+      category: logic-gap
+
+  - id: benchjack-v6-unconditional-success
+    patterns:
+      - pattern-either:
+          - pattern: |
+              def validate(...):
+                  ...
+                  return 1.0, True, ...
+          - pattern: |
+              def validate(...):
+                  ...
+                  return 1.0, ...
+          - pattern: |
+              def score(...):
+                  ...
+                  return 1.0
+          - pattern: |
+              def grade(...):
+                  ...
+                  return True
+    message: >
+      [V6] Scoring function may return success unconditionally. Verify
+      that there are actual content checks before the return.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V6
+      category: logic-gap
+      note: "May be a false positive — check for conditionals before return"
+
+  # ============================================================
+  # V7: Trusting the Output of Untrusted Code
+  # ============================================================
+
+  - id: benchjack-v7-read-test-results-file
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: pathlib.Path($PATH).read_text(...)
+          - pattern: json.load(open($PATH, ...))
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: ".*(result|reward|score|output|report|junit|test.report).*"
+    message: >
+      [V7] Reading a results/reward file. If this file is written inside
+      an agent-controlled environment, the agent can fake results.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      vulnerability: V7
+      category: untrusted-output
+
+  - id: benchjack-v7-parse-xml-results
+    patterns:
+      - pattern-either:
+          - pattern: ET.parse($FILE)
+          - pattern: ElementTree.parse($FILE)
+          - pattern: minidom.parse($FILE)
+          - pattern: lxml.etree.parse($FILE)
+    message: >
+      [V7] Parsing XML file (possibly JUnit/pytest results). If the XML
+      was generated inside an agent-controlled environment, results can be faked.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V7
+      category: untrusted-output
+
+  - id: benchjack-v7-trust-subprocess-output
+    patterns:
+      - pattern-either:
+          - pattern: $RESULT = subprocess.run(..., capture_output=True, ...)
+          - pattern: $RESULT = subprocess.check_output(...)
+          - pattern: $RESULT = subprocess.getoutput(...)
+    message: >
+      [V7] Capturing subprocess output. If the subprocess runs inside
+      an agent-controlled environment, the output cannot be trusted.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      vulnerability: V7
+      category: untrusted-output
+      note: "Check whether the subprocess runs in agent or evaluator context"
+
+  # ============================================================
+  # V8: Granting Unnecessary Permissions
+  # ============================================================
+
+  - id: benchjack-v8-docker-privileged
+    patterns:
+      - pattern-either:
+          - pattern: "...--privileged..."
+          - pattern: "...privileged: true..."
+    message: >
+      [V8] Docker container runs with --privileged. The agent has full
+      host capabilities and can escape the container.
+    languages: [generic]
+    severity: ERROR
+    metadata:
+      vulnerability: V8
+      category: permissions
+
+  - id: benchjack-v8-docker-network-host
+    pattern: "...--network host..."
+    message: >
+      [V8] Docker container uses host networking. The agent has full
+      network access including to the evaluator and host services.
+    languages: [generic]
+    severity: ERROR
+    metadata:
+      vulnerability: V8
+      category: permissions
+
+  - id: benchjack-v8-docker-run-as-root
+    patterns:
+      - pattern-either:
+          - pattern: "USER root"
+          - pattern: "...--user root..."
+          - pattern: "...--user 0..."
+    message: >
+      [V8] Container runs as root. The agent has elevated privileges
+      that may allow sandbox escape or filesystem manipulation.
+    languages: [generic, dockerfile]
+    severity: WARNING
+    metadata:
+      vulnerability: V8
+      category: permissions
+
+  - id: benchjack-v8-cap-add
+    pattern: "...--cap-add..."
+    message: >
+      [V8] Docker container granted extra capabilities. Check whether
+      these are necessary for the benchmark tasks.
+    languages: [generic]
+    severity: WARNING
+    metadata:
+      vulnerability: V8
+      category: permissions

@@ -1,0 +1,33 @@
+[project]
+name = "benchjack"
+version = "0.1.0"
+description = "AI agent benchmark hackability scanner with a real-time web dashboard"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+]
+
+[project.scripts]
+benchjack = "benchjack:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["server*"]
+
+[tool.setuptools]
+py-modules = ["benchjack"]
+
+[tool.setuptools.package-data]
+"*" = [
+    "*.yml",
+    "*.sh",
+    "*.py",
+    "*.html",
+    "*.css",
+    "*.js",
+    "*.md",
+]

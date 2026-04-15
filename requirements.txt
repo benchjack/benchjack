@@ -1,4 +1,6 @@
 fastapi>=0.104.0
 uvicorn>=0.24.0
+
+# Static analysis tools (also available via: pip install benchjack[tools])
 semgrep
 bandit

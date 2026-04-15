@@ -30,6 +30,7 @@ Examples:
 
 import argparse
 import asyncio
+import shutil
 import sys
 import webbrowser
 from pathlib import Path
@@ -143,6 +144,80 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
         sandbox.cleanup()
 
 
+def preflight_checks(backend: str, use_sandbox: bool) -> list[str]:
+    """Verify that required external tools are available.
+
+    Returns a list of human-readable error strings (empty == all good).
+    """
+    errors: list[str] = []
+
+    # -- AI backend ----------------------------------------------------------
+    if backend == "auto":
+        if not shutil.which("claude") and not shutil.which("codex"):
+            errors.append(
+                "No AI backend found: neither 'claude' nor 'codex' is on PATH.\n"
+                "  Fix: install Claude Code  →  npm i -g @anthropic-ai/claude-code\n"
+                "       or install Codex CLI  →  npm i -g @openai/codex"
+            )
+    elif backend == "claude":
+        if not shutil.which("claude"):
+            errors.append(
+                "'claude' CLI not found on PATH.\n"
+                "  Fix: npm i -g @anthropic-ai/claude-code"
+            )
+    elif backend == "codex":
+        if not shutil.which("codex"):
+            errors.append(
+                "'codex' CLI not found on PATH.\n"
+                "  Fix: npm i -g @openai/codex"
+            )
+
+    # -- Docker (when sandboxing is requested) --------------------------------
+    if use_sandbox:
+        if not shutil.which("docker"):
+            errors.append(
+                "'docker' not found on PATH.\n"
+                "  Fix: install Docker Desktop  →  https://docs.docker.com/get-docker/"
+            )
+        else:
+            # docker exists, but the daemon might not be running
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["docker", "info"],
+                    capture_output=True, timeout=10,
+                )
+                if result.returncode != 0:
+                    errors.append(
+                        "Docker daemon is not running.\n"
+                        "  Fix: start Docker Desktop or run 'sudo systemctl start docker'"
+                    )
+            except (subprocess.TimeoutExpired, OSError):
+                errors.append(
+                    "Could not reach the Docker daemon (timed out).\n"
+                    "  Fix: start Docker Desktop or run 'sudo systemctl start docker'"
+                )
+
+    # -- Static analysis tools (when NOT sandboxed) ---------------------------
+    # Inside the sandbox container these are pre-installed; on the host the
+    # user needs them available.
+    if not use_sandbox:
+        missing_tools = []
+        for tool, install in [
+            ("semgrep", "pip install semgrep   or   brew install semgrep"),
+            ("bandit",  "pip install bandit"),
+        ]:
+            if not shutil.which(tool):
+                missing_tools.append(f"  - '{tool}' not found.  Fix: {install}")
+        if missing_tools:
+            errors.append(
+                "Static analysis tools missing (required when running without sandbox):\n"
+                + "\n".join(missing_tools)
+            )
+
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="benchjack",
@@ -237,6 +312,14 @@ def main():
         print(f"  Backend: {args.backend}")
         print(f"  Sandbox: {sandbox_label}")
 
+        # Pre-flight checks
+        errors = preflight_checks(backend=args.backend, use_sandbox=use_sandbox)
+        if errors:
+            print("\nPre-flight checks failed:\n", file=sys.stderr)
+            for err in errors:
+                print(f"  ✗ {err}\n", file=sys.stderr)
+            sys.exit(1)
+
         asyncio.run(cli_run(
             target=target,
             backend=args.backend,
@@ -248,6 +331,15 @@ def main():
         return
 
     # ---- Web UI mode ----
+
+    # Pre-flight checks (web mode always uses default backend + sandbox on)
+    use_sandbox = not args.no_sandbox
+    errors = preflight_checks(backend=args.backend, use_sandbox=use_sandbox)
+    if errors:
+        print("\nPre-flight checks failed:\n", file=sys.stderr)
+        for err in errors:
+            print(f"  ✗ {err}\n", file=sys.stderr)
+        sys.exit(1)
 
     # Build the URL
     url = f"http://localhost:{args.port}"

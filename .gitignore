@@ -1,4 +1,38 @@
+# Build artifacts
 *.egg-info/
-**/__pycache__/
+build/
+dist/
+*.pyc
+*.pyo
+__pycache__/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# BenchJack output
 output/
+output-*/
 hacks/
+hacks-*/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage

@@ -2,11 +2,44 @@
 name = "benchjack"
 version = "0.1.0"
 description = "AI agent benchmark hackability scanner with a real-time web dashboard"
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+    { name = "BenchJack Contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
 ]
+
+[project.optional-dependencies]
+tools = [
+    "semgrep",
+    "bandit",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.25",
+]
+
+[project.urls]
+Homepage = "https://github.com/benchjack/benchjack"
+Repository = "https://github.com/benchjack/benchjack"
+Issues = "https://github.com/benchjack/benchjack/issues"
+Changelog = "https://github.com/benchjack/benchjack/blob/main/CHANGELOG.md"
 
 [project.scripts]
 benchjack = "benchjack:main"

@@ -91,6 +91,29 @@ export function renderScoreboard() {
       const mark = document.createElement("span");
       mark.className = "status-hacked";
       mark.textContent = "HACKED!";
+      mark.dataset.task = taskId;
+      // Build native title fallback from exploit data
+      const exploitVulns = state.exploitResults[taskId] || [];
+      if (exploitVulns.length > 0) {
+        mark.title = exploitVulns.map(v => {
+          const meta = VULN_META[v.vulnerability] || {};
+          return `${v.vulnerability}: ${meta.name || ""}${v.severity ? ` [${v.severity}]` : ""}`;
+        }).join("\n");
+      } else {
+        // Fallback: check state.tasks for hacked vulns
+        const td = state.tasks[taskId] || {};
+        const ad = state.tasks["all_tasks"] || {};
+        const parts = [];
+        for (let i = 1; i <= 8; i++) {
+          const vId = `V${i}`;
+          const r = td[vId] || ad[vId];
+          if (r && r.hacked) {
+            const meta = VULN_META[vId] || {};
+            parts.push(`${vId}: ${meta.name || ""}${r.severity ? ` [${r.severity}]` : ""}`);
+          }
+        }
+        if (parts.length > 0) mark.title = parts.join("\n");
+      }
       certCell.appendChild(mark);
     }
     row.appendChild(certCell);
@@ -167,6 +190,64 @@ export function showTooltip(dot) {
   els.tooltipContent.innerHTML = html;
 
   const rect = dot.getBoundingClientRect();
+  els.tooltip.style.display = "";
+  els.tooltip.style.left = `${rect.left + rect.width / 2}px`;
+  els.tooltip.style.top = `${rect.bottom + 8}px`;
+
+  requestAnimationFrame(() => {
+    const tipRect = els.tooltip.getBoundingClientRect();
+    if (tipRect.right > window.innerWidth - 10) {
+      els.tooltip.style.left = `${window.innerWidth - tipRect.width - 10}px`;
+    }
+    if (tipRect.left < 10) {
+      els.tooltip.style.left = "10px";
+    }
+    if (tipRect.bottom > window.innerHeight - 10) {
+      els.tooltip.style.top = `${rect.top - tipRect.height - 8}px`;
+    }
+  });
+}
+
+export function showHackedTooltip(el) {
+  const taskId = el.dataset.task;
+  if (!taskId) return;
+
+  // Gather exploit info: prefer exploitResults, fall back to state.tasks hacked entries
+  let vulns = state.exploitResults[taskId] || [];
+  if (vulns.length === 0) {
+    const taskData = state.tasks[taskId] || {};
+    const allData = state.tasks["all_tasks"] || {};
+    for (let i = 1; i <= 8; i++) {
+      const vId = `V${i}`;
+      const r = taskData[vId] || allData[vId];
+      if (r && r.hacked) {
+        vulns.push({ vulnerability: vId, severity: r.severity || "", explanation: r.explanation || "" });
+      }
+    }
+  }
+
+  let html = `<strong>Exploited: ${escapeHTML(taskId)}</strong>`;
+  if (vulns.length === 0) {
+    html += `<div class="tooltip-row">Confirmed hacked (no vulnerability details available)</div>`;
+  } else {
+    for (const v of vulns) {
+      const meta = VULN_META[v.vulnerability] || {};
+      const sev = (v.severity || "").toUpperCase();
+      html += `<div class="tooltip-hacked-vuln">`;
+      html += `<span class="tooltip-vuln-id">${escapeHTML(v.vulnerability)}</span>`;
+      if (meta.name) html += ` ${escapeHTML(meta.name)}`;
+      if (sev) html += ` <span class="tooltip-sev-${sev.toLowerCase()}">[${sev}]</span>`;
+      html += `</div>`;
+      if (v.explanation) {
+        const txt = v.explanation.length > 200 ? v.explanation.slice(0, 200) + "…" : v.explanation;
+        html += `<div class="tooltip-explanation">${escapeHTML(txt)}</div>`;
+      }
+    }
+  }
+
+  els.tooltipContent.innerHTML = html;
+
+  const rect = el.getBoundingClientRect();
   els.tooltip.style.display = "";
   els.tooltip.style.left = `${rect.left + rect.width / 2}px`;
   els.tooltip.style.top = `${rect.bottom + 8}px`;

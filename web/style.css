@@ -1378,6 +1378,7 @@ body {
   color: #e05555;
   letter-spacing: 0.03em;
   font-style: italic;
+  cursor: help;
 }
 
 /* ---- Tooltip ---- */
@@ -1388,7 +1389,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 16px;
-  max-width: 320px;
+  max-width: 420px;
   min-width: 200px;
   font-size: 12px;
   line-height: 1.5;
@@ -1421,6 +1422,30 @@ body {
   border-top: 1px solid var(--border);
   color: var(--text);
   font-style: italic;
+}
+
+.tooltip-hacked-vuln {
+  margin-top: 6px;
+  font-weight: 600;
+}
+
+.tooltip-hacked-vuln + .tooltip-explanation {
+  margin-top: 2px;
+  padding-top: 0;
+  border-top: none;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tooltip-hacked-vuln + .tooltip-explanation + .tooltip-hacked-vuln,
+.tooltip-hacked-vuln + .tooltip-hacked-vuln {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.tooltip-vuln-id {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 /* ---- Scoreboard Empty State ---- */

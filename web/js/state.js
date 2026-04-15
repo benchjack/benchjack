@@ -56,6 +56,8 @@ export const state = {
   vulnClasses: {},
   // Tasks confirmed exploited via exploit_result.jsonl
   exploitedTasks: new Set(),
+  // Exploit result details: { taskId: [ { vulnerability, severity, explanation }, ... ] }
+  exploitResults: {},
 
   currentRunId: null,
   loadedRunFinished: false,  // true when the currently-loaded run is fully completed

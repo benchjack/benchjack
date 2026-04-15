@@ -187,7 +187,15 @@ export function handleEvent(event) {
 
     case "exploit_results": {
       for (const r of (data.results || [])) {
-        if (r.hacked && r.task) state.exploitedTasks.add(r.task);
+        if (r.hacked && r.task) {
+          state.exploitedTasks.add(r.task);
+          if (!state.exploitResults[r.task]) state.exploitResults[r.task] = [];
+          state.exploitResults[r.task].push({
+            vulnerability: r.vulnerability || "",
+            severity: r.severity || "",
+            explanation: r.explanation || "",
+          });
+        }
       }
       renderScoreboard();
       break;

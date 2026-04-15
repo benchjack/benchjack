@@ -5,7 +5,7 @@
 import { $, $$, state, els } from "./state.js";
 import { setView, switchTab, setMainView, resetUIState, updateActionButtons } from "./ui.js";
 import { refilterFindings } from "./findings.js";
-import { showTooltip, showTaskTooltip, hideTooltip } from "./scoreboard.js";
+import { showTooltip, showTaskTooltip, showHackedTooltip, hideTooltip } from "./scoreboard.js";
 import { startAudit, startHack, cancelAudit, rerunFromPhase, continueRun } from "./api.js";
 import { toggleRunsPanel, closeRunsPanel } from "./runs.js";
 
@@ -224,6 +224,8 @@ els.progressBar.addEventListener("click", (e) => {
 document.addEventListener("mouseover", (e) => {
   const dot = e.target.closest(".vuln-dot");
   if (dot) { showTooltip(dot); return; }
+  const hacked = e.target.closest(".status-hacked");
+  if (hacked) { showHackedTooltip(hacked); return; }
   const task = e.target.closest(".col-task-truncated");
   if (task) showTaskTooltip(task);
 });
@@ -231,7 +233,8 @@ document.addEventListener("mouseover", (e) => {
 document.addEventListener("mouseout", (e) => {
   const dot = e.target.closest(".vuln-dot");
   const task = e.target.closest(".col-task-truncated");
-  if (dot || task) hideTooltip();
+  const hacked = e.target.closest(".status-hacked");
+  if (dot || task || hacked) hideTooltip();
 });
 
 // ---- Runs panel ----

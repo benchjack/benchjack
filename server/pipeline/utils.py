@@ -223,11 +223,23 @@ def _expand_and_split_exploit_results(
             for tid in task_ids:
                 task_results.append({**entry, "task": tid})
                 if entry.get("hacked"):
-                    exploit_list.append({"task": tid, "hacked": True})
+                    exploit_list.append({
+                        "task": tid,
+                        "hacked": True,
+                        "vulnerability": entry.get("vulnerability", ""),
+                        "severity": entry.get("severity", ""),
+                        "explanation": entry.get("explanation", ""),
+                    })
         else:
             task_results.append(entry)
             if entry.get("hacked"):
-                exploit_list.append({"task": task, "hacked": True})
+                exploit_list.append({
+                    "task": task,
+                    "hacked": True,
+                    "vulnerability": entry.get("vulnerability", ""),
+                    "severity": entry.get("severity", ""),
+                    "explanation": entry.get("explanation", ""),
+                })
 
     return task_results, exploit_list
 

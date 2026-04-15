@@ -219,6 +219,7 @@ export function resetUIState(mode) {
   state.taskPaths = {};
   state.vulnClasses = {};
   state.exploitedTasks = new Set();
+  state.exploitResults = {};
   els.findingsList.innerHTML = "";
   updateFindingsCounts();
 

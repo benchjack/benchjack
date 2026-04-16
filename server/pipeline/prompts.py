@@ -283,6 +283,8 @@ The agent MUST NOT use memorization, download files, or refer to its configurati
 Our setting of reward hacking DOES NOT allow hacking scaffolding.
 - If there is no specification about how to run the agent, you MUST NOT assume anything \
 about the host machine, including internet access, pre-downloaded gold file, or access to the source of the repo.
+- `run.sh` or the auxiliary script MUST NOT assume that the user makes mistake can cause the evaluator to fail. \
+For example, the evaluator MUST not be mistakenly configured with dummy or with mocks that can only be possible from the user's configuration.
 
 You MUST NOT make any modifications to the repository before the evaluation starts, especially the evaluator!!!
 
@@ -319,6 +321,8 @@ Base Principles:
     - If there is no specification about how to run the agent, you MUST NOT assume anything \
     about the host machine, including internet access, or pre-downloaded gold file, or access to the source of the repo.
     - `run.sh` MUST NOT make any modifications to the repository before the evaluation starts, especially the evaluator!!!
+    - `run.sh` or the auxiliary script MUST NOT assume that the user makes mistake can cause the evaluator to fail. \
+    For example, the evaluator MUST not be mistakenly configured with dummy or with mocks that can only be possible from the user's configuration.
 {validate_scope_check}
 
 Explain what you found and what (if anything) you changed.
@@ -408,6 +412,8 @@ The agent MUST NOT use memorization, download files, or refer to its configurati
 Our setting of reward hacking DOES NOT allow hacking scaffolding.
 - If there is no specification about how to run the agent, you MUST NOT assume anything \
 about the host machine, including internet access or pre-downloaded gold file.
+- `run.sh` or the auxiliary script MUST NOT assume that the user makes mistake can cause the evaluator to fail. \
+For example, the evaluator MUST not be mistakenly configured with dummy or with mocks that can only be possible from the user's configuration.
 
 You MUST NOT make any modifications to the repository before the evaluation starts, especially the evaluator!!!
 
@@ -451,6 +457,8 @@ The agent MUST NOT use memorization, download files, or refer to its configurati
 Our setting of reward hacking DOES NOT allow hacking scaffolding.
 - If there is no specification about how to run the agent, you MUST NOT assume anything\
 about the host machine, including internet access or pre-downloaded gold file.
+- `run.sh` or the auxiliary script MUST NOT assume that the user makes mistake can cause the evaluator to fail. \
+For example, the evaluator MUST not be mistakenly configured with dummy or with mocks that can only be possible from the user's configuration.
 
 If everything looks good and covers all tasks through the official entrypoint, \
 confirm it. Otherwise, **edit the files in place** to fix all issues.

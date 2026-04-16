@@ -56,7 +56,7 @@ We used BenchJack to audit 8 major AI agent benchmarks covering 4,458 tasks — 
 | **GAIA** | 165 | Public answer lookup + normalization collisions in string matching | ~98% |
 | **CAR-bench** | — | Hidden HTML instructions bias LLM judge; generic refusals skip grading | 100% |
 
-And there are more to come!
+And there are more to come — see [`audits/`](audits/) for community-contributed audit writeups, and [`audits/README.md`](audits/README.md) for how to submit your own.
 
 ## Quick Start
 
@@ -226,6 +226,7 @@ web/
 .claude/skills/benchjack/
   SKILL.md                Claude Code skill definition (run /benchjack in Claude Code)
   tools/                  Static analysis scripts & Semgrep rules
+audits/                   Community-contributed audit writeups (one folder per benchmark)
 Dockerfile.sandbox        Sandbox container image
 ```
 
@@ -243,6 +244,8 @@ BenchJack is in early preview. Keep the following in mind:
 ## Contributing
 
 We welcome contributions of all kinds — new vulnerability classes, better prompts, static analysis rules, benchmark adapters, UI improvements, and tests.
+
+**Audited a benchmark with BenchJack?** Share your findings in [`audits/`](audits/) — see [`audits/README.md`](audits/README.md) for the submission guide and [`audits/TEMPLATE.md`](audits/TEMPLATE.md) for a ready-to-fill skeleton.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and ideas on where to start.
 

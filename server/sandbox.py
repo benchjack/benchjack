@@ -32,9 +32,17 @@ from typing import AsyncGenerator
 
 log = logging.getLogger("benchjack.sandbox")
 
+# os.getuid/getgid are POSIX-only; fall back to 1000 on Windows so the
+# module imports cleanly and Docker-on-Windows users get a sane default.
+def _host_uid() -> int:
+    return getattr(os, "getuid", lambda: 1000)()
+
+def _host_gid() -> int:
+    return getattr(os, "getgid", lambda: 1000)()
+
 IMAGE_NAME = "benchjack-sandbox"
 # Tag includes the host UID so each user gets an image with their UID baked in.
-IMAGE_TAG = f"{IMAGE_NAME}:{os.getuid()}"
+IMAGE_TAG = f"{IMAGE_NAME}:{_host_uid()}"
 DOCKERFILE = Path(__file__).resolve().parent.parent / "Dockerfile.sandbox"
 
 
@@ -171,8 +179,8 @@ class Sandbox:
 
         proc = await asyncio.create_subprocess_exec(
             "docker", "build",
-            "--build-arg", f"UID={os.getuid()}",
-            "--build-arg", f"GID={os.getgid()}",
+            "--build-arg", f"UID={_host_uid()}",
+            "--build-arg", f"GID={_host_gid()}",
             "-t", IMAGE_TAG,
             "-f", str(DOCKERFILE),
             str(DOCKERFILE.parent),
@@ -260,7 +268,7 @@ class Sandbox:
         args += [
             "-v", f"{self._claude_dir}:/home/user",
             "-e", "HOME=/home/user",
-            "--user", f"{os.getuid()}:{os.getgid()}",
+            "--user", f"{_host_uid()}:{_host_gid()}",
             IMAGE_TAG,
             "sleep", "infinity",
         ]
@@ -576,7 +584,7 @@ class Sandbox:
             args += [
                 "-v", f"{self._claude_dir}:/home/user",
                 "-e", "HOME=/home/user",
-                "--user", f"{os.getuid()}:{os.getgid()}",
+                "--user", f"{_host_uid()}:{_host_gid()}",
                 "-i",
             ]
         args.append(IMAGE_TAG)

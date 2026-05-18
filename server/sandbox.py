@@ -33,7 +33,8 @@ from typing import AsyncGenerator
 log = logging.getLogger("benchjack.sandbox")
 
 IMAGE_NAME = "benchjack-sandbox"
-IMAGE_TAG = f"{IMAGE_NAME}:latest"
+# Tag includes the host UID so each user gets an image with their UID baked in.
+IMAGE_TAG = f"{IMAGE_NAME}:{os.getuid()}"
 DOCKERFILE = Path(__file__).resolve().parent.parent / "Dockerfile.sandbox"
 
 
@@ -77,6 +78,7 @@ class Sandbox:
         self._container_id: str | None = None  # persistent post-setup container
         self._output_dir: str | None = None    # host path → /output in container
         self._jacks_dir: str | None = None     # host path → /hacks in container
+        self._refresh_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Path helpers — container vs. host
@@ -169,6 +171,8 @@ class Sandbox:
 
         proc = await asyncio.create_subprocess_exec(
             "docker", "build",
+            "--build-arg", f"UID={os.getuid()}",
+            "--build-arg", f"GID={os.getgid()}",
             "-t", IMAGE_TAG,
             "-f", str(DOCKERFILE),
             str(DOCKERFILE.parent),
@@ -225,6 +229,8 @@ class Sandbox:
             "--detach",
             "--security-opt", "no-new-privileges",
             "--cap-drop=ALL",
+            "--cap-add", "NET_RAW",
+            "--cap-add", "NET_BIND_SERVICE",
             "--memory=4g",
             "--cpus=2",
             "--pids-limit=512",
@@ -272,6 +278,7 @@ class Sandbox:
 
         if proc.returncode == 0:
             self._container_id = out.decode().strip()
+            self._refresh_task = asyncio.create_task(self._refresh_credentials_loop())
             log.info("Started main sandbox container %s", self._container_id[:12])
             if emit:
                 await emit("log", {
@@ -289,6 +296,9 @@ class Sandbox:
 
     async def stop_main_container(self) -> None:
         """Stop the persistent container if it is running."""
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            self._refresh_task = None
         if not self._container_id:
             return
         cid = self._container_id
@@ -344,11 +354,16 @@ class Sandbox:
                 yield line
             return
 
+        if self._container_id and not await self._is_container_alive():
+            log.warning("Main container %s died — restarting", self._container_id[:12])
+            self._container_id = None
+            await self.start_main_container()
+
         if self._container_id:
             # Post-setup: exec into the persistent container
             docker_cmd = ["docker", "exec", "-i", self._container_id, "sh", "-c", shell_cmd]
         else:
-            # Setup phase: ephemeral container
+            # Setup phase or restart failed: ephemeral container
             docker_cmd = self._base_docker_args(network=True, ai=True) + [
                 "sh", "-c", shell_cmd,
             ]
@@ -378,6 +393,9 @@ class Sandbox:
     # ------------------------------------------------------------------
 
     def cleanup(self):
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            self._refresh_task = None
         if self._container_id:
             cid = self._container_id
             self._container_id = None
@@ -449,6 +467,74 @@ class Sandbox:
             )
 
     # ------------------------------------------------------------------
+    # Internals — credential refresh, extras install, liveness check
+    # ------------------------------------------------------------------
+
+    async def _refresh_credentials_loop(self, interval: int = 45 * 60) -> None:
+        """Re-inject fresh OAuth credentials into the mounted ~/.claude.json every *interval* seconds.
+
+        Runs as a background task for the lifetime of the persistent container.
+        Keeps long runs authenticated after the initial OAuth token expires (~1 h).
+        """
+        while self._container_id:
+            await asyncio.sleep(interval)
+            if not self._claude_dir:
+                continue
+            creds = _extract_claude_credentials()
+            if not creds:
+                continue
+            dest = os.path.join(self._claude_dir, ".claude.json")
+            try:
+                config: dict = {}
+                if os.path.isfile(dest):
+                    with open(dest) as fh:
+                        config = json.load(fh)
+                config.update(creds)
+                with open(dest, "w") as fh:
+                    json.dump(config, fh)
+                log.debug("Refreshed OAuth credentials in mounted home dir")
+            except Exception as exc:
+                log.warning("Failed to refresh credentials: %s", exc)
+
+    async def install_extras(self, packages: list[str]) -> None:
+        """Install extra apt packages into the persistent container.
+
+        Call this after ``start_main_container()`` and before the main phases
+        when the benchmark needs runtimes not shipped in the base image
+        (e.g. ``["default-jdk", "golang", "rustup"]``).
+        """
+        if not self._container_id or not packages:
+            return
+        pkg_str = " ".join(packages)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", self._container_id,
+            "sh", "-c",
+            f"apt-get update -qq && apt-get install -y --no-install-recommends {pkg_str}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode != 0:
+            log.warning("install_extras failed: %s", out.decode(errors="replace")[:500])
+
+    async def _is_container_alive(self) -> bool:
+        """Return True if the persistent container is still running."""
+        if not self._container_id:
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "inspect",
+                "--format={{.State.Running}}",
+                self._container_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            return out.decode().strip() == "true"
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
     # Internals — Docker argument builder (ephemeral containers)
     # ------------------------------------------------------------------
 
@@ -473,6 +559,8 @@ class Sandbox:
             args += ["-v", f"{self.benchmark_path}:/workspace"]
         if not network:
             args += ["--network", "none"]
+        else:
+            args += ["--cap-add", "NET_RAW", "--cap-add", "NET_BIND_SERVICE"]
         if ai:
             # Prefer explicit ANTHROPIC_API_KEY from the environment (stable);
             # only fall back to the short-lived OAuth access token from Keychain.

@@ -26,8 +26,14 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex
 # Directories the sandbox expects
 RUN mkdir -p /workspace /tools /results
 
-# Non-root user (UID 1000 matches typical host user)
-RUN useradd -m -u 1000 sandbox
-USER sandbox
+ARG UID=1000
+ARG GID=1000
+
+# Non-root user — UID/GID injected at build time to match the host user,
+# so tools inside the container (git, npm, Claude Code) can resolve the
+# current user via /etc/passwd even when UID != 1000.
+RUN if ! getent group  ${GID}  >/dev/null 2>&1; then groupadd -g ${GID} sandbox; fi && \
+    if ! getent passwd ${UID}  >/dev/null 2>&1; then useradd -m -u ${UID} -g ${GID} -d /home/user sandbox; fi
+USER ${UID}:${GID}
 
 WORKDIR /workspace

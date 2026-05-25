@@ -254,11 +254,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and ideas on where
 If you use BenchJack in your research, please cite:
 
 ```bibtex
-@software{benchjack2025,
-  title     = {BenchJack: AI Agent Benchmark Hackability Scanner},
-  author    = {BenchJack Contributors},
-  year      = {2025},
-  url       = {https://github.com/benchjack/benchjack}
+@misc{wang2026androidsdreambreakinggame,
+      title={Do Androids Dream of Breaking the Game? Systematically Auditing AI Agent Benchmarks with BenchJack}, 
+      author={Hao Wang and Hanchen Li and Qiuyang Mang and Alvin Cheung and Koushik Sen and Dawn Song},
+      year={2026},
+      eprint={2605.12673},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2605.12673}, 
 }
 ```
 

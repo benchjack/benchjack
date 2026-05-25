@@ -56,6 +56,35 @@ def _extract_claude_credentials() -> dict | None:
         return None
 
 
+def _ignore_transient_auth_files(_dir: str, names: list[str]) -> set[str]:
+    """Skip transient or bulky auth-adjacent files while copying CLI homes."""
+    bulky_dirs = {
+        "vendor_imports",
+        "plugins",
+        "skills",
+        "memories",
+        "sessions",
+        "projects",
+        "logs",
+        "tmp",
+        "cache",
+        "__pycache__",
+    }
+    return {
+        name for name in names
+        if name in bulky_dirs or name.endswith((".sqlite-shm", ".sqlite-wal"))
+    }
+
+
+def _docker_user_args() -> list[str]:
+    """Return Docker --user args on POSIX hosts; omit them on Windows."""
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if not getuid or not getgid:
+        return []
+    return ["--user", f"{getuid()}:{getgid()}"]
+
+
 class Sandbox:
     """Docker sandbox for benchmark analysis.
 
@@ -254,10 +283,10 @@ class Sandbox:
         args += [
             "-v", f"{self._claude_dir}:/home/user",
             "-e", "HOME=/home/user",
-            "--user", f"{os.getuid()}:{os.getgid()}",
             IMAGE_TAG,
             "sleep", "infinity",
         ]
+        args[-2:-2] = _docker_user_args()
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -411,7 +440,8 @@ class Sandbox:
         if claude_dir.is_dir():
             shutil.copytree(
                 str(claude_dir), dot_claude_dest,
-                dirs_exist_ok=True, ignore_dangling_symlinks=True,
+                dirs_exist_ok=True, ignore=_ignore_transient_auth_files,
+                ignore_dangling_symlinks=True,
                 copy_function=shutil.copy2,
             )
         else:
@@ -444,7 +474,8 @@ class Sandbox:
         if codex_dir.is_dir():
             shutil.copytree(
                 str(codex_dir), os.path.join(self._claude_dir, ".codex"),
-                dirs_exist_ok=True, ignore_dangling_symlinks=True,
+                dirs_exist_ok=True, ignore=_ignore_transient_auth_files,
+                ignore_dangling_symlinks=True,
                 copy_function=shutil.copy2,
             )
 
@@ -488,7 +519,7 @@ class Sandbox:
             args += [
                 "-v", f"{self._claude_dir}:/home/user",
                 "-e", "HOME=/home/user",
-                "--user", f"{os.getuid()}:{os.getgid()}",
+                *_docker_user_args(),
                 "-i",
             ]
         args.append(IMAGE_TAG)

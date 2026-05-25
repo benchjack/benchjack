@@ -23,7 +23,9 @@ def sandbox(tmp_path):
 class TestSandboxPaths:
     def test_workspace_disabled(self, sandbox):
         sandbox.set_benchmark_path("/some/bench")
-        assert sandbox.workspace == "/some/bench"
+        # set_benchmark_path normalises via os.path.abspath — on Windows
+        # "/some/bench" becomes "C:\some\bench", so compare after abspath.
+        assert sandbox.workspace == os.path.abspath("/some/bench")
 
     def test_tools_mount_disabled(self, sandbox):
         assert sandbox.tools_mount == sandbox.tools_dir

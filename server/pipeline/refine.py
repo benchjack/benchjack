@@ -1,0 +1,400 @@
+"""
+RefinePipeline — iterative attacker/defender loop (Section 4.3).
+
+Phases: r1_attack → r1_patch → r2_attack → r2_patch → r3_attack
+Early exit: if hack_rate == 0 after any attack round, remaining rounds are
+skipped and convergence is declared.
+"""
+import json
+import os
+import re
+import shutil
+import time
+from pathlib import Path
+
+from ..ai_runner import AIRunner
+from ..sandbox import Sandbox
+from .models import EXPLOIT_RESULT_JSONL, REFINE_PHASES, EmitFn
+from .prompts import HACK_STAGE1_PROMPT, HACK_STAGE2_PROMPT, PATCH_PROMPT
+from .utils import (
+    _derive_benchmark_name,
+    _expand_and_split_exploit_results,
+    _read_exploit_results,
+    _read_task_ids_json,
+    _read_task_results_jsonl,
+)
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+class RefinePipeline:
+    """GAN-inspired iterative attacker/defender loop (up to 3 rounds)."""
+
+    def __init__(
+        self,
+        target: str,
+        emit: EmitFn,
+        ai: AIRunner,
+        sandbox: Sandbox,
+        *,
+        max_rounds: int = 3,
+    ):
+        self.target = target
+        self.emit = emit
+        self.ai = ai
+        self.sandbox = sandbox
+        self.max_rounds = min(max(max_rounds, 1), 3)
+
+        self.benchmark_path: str | None = None
+        self._cancelled = False
+        self._benchmark_name = "refine_" + _derive_benchmark_name(target)
+
+    # ------------------------------------------------------------------
+    # Public
+    # ------------------------------------------------------------------
+
+    async def run(self):
+        self._ensure_dirs()
+
+        self.benchmark_path = str(self.output_dir / "repo")
+        os.makedirs(self.benchmark_path, exist_ok=True)
+        self.sandbox.set_benchmark_path(self.benchmark_path)
+
+        await self.emit("audit_start", {
+            "target": self.target,
+            "mode": "refine",
+            "phases": [{"id": pid, "label": plabel} for pid, plabel in REFINE_PHASES],
+        })
+
+        await self.sandbox.start_main_container(emit=self.emit)
+        try:
+            await self._run_loop()
+        finally:
+            await self.sandbox.stop_main_container()
+
+        await self.emit("audit_complete", {
+            "target": self.target,
+            "benchmark_path": self.benchmark_path,
+            "jacks_dir": str(self.jacks_dir),
+            "total_findings": 0,
+            "findings": [],
+            "failed": False,
+        })
+
+    def cancel(self):
+        self._cancelled = True
+
+    # ------------------------------------------------------------------
+    # Directories
+    # ------------------------------------------------------------------
+
+    @property
+    def output_dir(self) -> Path:
+        return _PROJECT_ROOT / "output" / self._benchmark_name
+
+    @property
+    def jacks_dir(self) -> Path:
+        return _PROJECT_ROOT / "hacks" / self._benchmark_name
+
+    def round_dir(self, n: int) -> Path:
+        return self.jacks_dir / f"r{n}"
+
+    def _ensure_dirs(self):
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.jacks_dir / "summary").mkdir(parents=True, exist_ok=True)
+        for n in range(1, 4):
+            (self.jacks_dir / f"r{n}").mkdir(parents=True, exist_ok=True)
+        self.sandbox.set_dirs(str(self.output_dir), str(self.jacks_dir))
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    async def _run_loop(self):
+        converged = False
+        last_hack_rate: float | None = None
+
+        for round_n in range(1, self.max_rounds + 1):
+            if self._cancelled:
+                break
+
+            # --- Attack phase ---
+            attack_id = f"r{round_n}_attack"
+            attack_label = f"Round {round_n} — Attack"
+            try:
+                await self._run_phase(
+                    attack_id, attack_label,
+                    lambda rn=round_n: self._phase_attack(rn),
+                    round_n=round_n,
+                )
+            except Exception:
+                break
+
+            if self._cancelled:
+                break
+
+            # --- Compute hack rate ---
+            hack_rate, hacked, total = self._compute_hack_rate()
+            last_hack_rate = hack_rate
+
+            # --- Convergence check ---
+            if total > 0 and hack_rate == 0.0:
+                converged = True
+                await self.emit("refine_round_complete", {
+                    "round": round_n,
+                    "hack_rate": 0.0,
+                    "hacked": 0,
+                    "total": total,
+                    "converged": True,
+                })
+                # Skip current round's patch (if not the last round)
+                if round_n < self.max_rounds:
+                    await self.emit("phase_skip", {
+                        "phase": f"r{round_n}_patch",
+                        "reason": "converged",
+                    })
+                # Skip all remaining rounds
+                for remaining in range(round_n + 1, self.max_rounds + 1):
+                    await self.emit("phase_skip", {
+                        "phase": f"r{remaining}_attack",
+                        "reason": "converged",
+                    })
+                    if remaining < self.max_rounds:
+                        await self.emit("phase_skip", {
+                            "phase": f"r{remaining}_patch",
+                            "reason": "converged",
+                        })
+                break
+
+            # --- Patch phase (rounds 1 and 2 only; no patch after round 3) ---
+            if round_n < self.max_rounds:
+                patch_id = f"r{round_n}_patch"
+                patch_label = f"Round {round_n} — Patch"
+                try:
+                    await self._run_phase(
+                        patch_id, patch_label,
+                        lambda rn=round_n: self._phase_patch(rn),
+                        round_n=round_n,
+                    )
+                except Exception:
+                    break
+
+            # --- Emit round complete ---
+            await self.emit("refine_round_complete", {
+                "round": round_n,
+                "hack_rate": round(hack_rate, 3),
+                "hacked": hacked,
+                "total": total,
+                "converged": False,
+            })
+
+        await self.emit("refine_complete", {
+            "converged": converged,
+            "final_hack_rate": round(last_hack_rate, 3) if last_hack_rate is not None else None,
+        })
+
+    # ------------------------------------------------------------------
+    # Hack-rate computation
+    # ------------------------------------------------------------------
+
+    def _compute_hack_rate(self) -> tuple[float, int, int]:
+        """Read exploit_result.jsonl from workspace and return (rate, hacked, total).
+
+        Handles the ``"all_tasks"`` sentinel: looks up the real task count from
+        a prior audit run in ``hacks/<plain_name>/`` and expands accordingly.
+        """
+        if not self.benchmark_path:
+            return 0.0, 0, 0
+
+        results = _read_exploit_results(self.benchmark_path)
+        if not results:
+            return 0.0, 0, 0
+
+        # Detect "all_tasks" sentinel
+        has_all_tasks = any(r["task"] == "all_tasks" for r in results)
+        if has_all_tasks:
+            plain_name = self._benchmark_name.removeprefix("refine_")
+            task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
+            task_ids = _read_task_ids_json(task_ids_dir)
+            # Expand to real task count if available, else treat as 1 virtual task
+            total = len(task_ids) if task_ids and "all_tasks" not in task_ids else 1
+            all_hacked = any(
+                r["task"] == "all_tasks" and r.get("hacked") for r in results
+            )
+            if all_hacked:
+                return 1.0, total, total
+            return 0.0, 0, total
+
+        total = len(results)
+        if total == 0:
+            return 0.0, 0, 0
+        hacked = sum(1 for r in results if r.get("hacked"))
+        return hacked / total, hacked, total
+
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def _save_state(self, phase_id: str, status: str, duration: float):
+        state_path = self.jacks_dir / "state.json"
+        state: dict = {}
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        state["target"] = self.target
+        state["mode"] = "refine"
+        state["backend"] = self.ai.backend
+        state["benchmark_name"] = self._benchmark_name
+        state["benchmark_path"] = self.benchmark_path or ""
+        state.setdefault("phases", {})[phase_id] = {
+            "status": status,
+            "duration": round(duration, 1),
+            "summary": "",
+        }
+        state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+    def _save_log(self, phase_id: str, content: str):
+        (self.output_dir / f"{phase_id}.log").write_text(content)
+
+    def _save_summary(self, phase_id: str, content: str):
+        if not content:
+            return
+        (self.jacks_dir / "summary" / f"{phase_id}.md").write_text(content)
+
+    def _save_poc_scripts(self, round_n: int):
+        if not self.benchmark_path:
+            return
+        src = os.path.join(self.benchmark_path, "benchjack_poc")
+        if not os.path.isdir(src):
+            return
+        dest = self.round_dir(round_n)
+        for f in os.listdir(src):
+            if f.endswith((".py", ".sh")):
+                shutil.copy2(os.path.join(src, f), dest / f)
+
+    def _save_exploit_results(self, round_n: int):
+        if not self.benchmark_path:
+            return
+        src = os.path.join(self.benchmark_path, EXPLOIT_RESULT_JSONL)
+        if not os.path.isfile(src):
+            return
+        shutil.copy2(src, self.round_dir(round_n) / EXPLOIT_RESULT_JSONL)
+
+    # ------------------------------------------------------------------
+    # Phase runner
+    # ------------------------------------------------------------------
+
+    async def _run_phase(self, phase_id: str, phase_label: str, handler, *, round_n: int = 1):
+        t0 = time.time()
+        await self.emit("phase_start", {"phase": phase_id, "label": phase_label})
+
+        log_lines: list[str] = []
+        original_emit = self.emit
+
+        async def capturing_emit(event_type, data):
+            await original_emit(event_type, data)
+            if event_type == "log":
+                mt = data.get("msg_type", "text")
+                if mt == "text":
+                    log_lines.append(data.get("text", ""))
+                elif mt == "prompt":
+                    log_lines.append(f"[prompt]\n{data.get('text', '')}\n[/prompt]")
+                elif mt == "tool_call":
+                    log_lines.append(f"[tool: {data.get('name', '?')}] {data.get('summary', '')}")
+                elif mt == "tool_result":
+                    log_lines.append(f"[result: {data.get('chars', 0)} chars]")
+
+        self.emit = capturing_emit
+        try:
+            output = await handler()
+            status = "completed"
+        except Exception as exc:
+            duration = time.time() - t0
+            self.emit = original_emit
+            self._save_log(phase_id, "\n".join(log_lines))
+            self._save_state(phase_id, "failed", duration)
+            await self.emit("error", {"phase": phase_id, "message": str(exc)})
+            await self.emit("phase_complete", {
+                "phase": phase_id,
+                "status": "failed",
+                "duration": round(duration, 1),
+                "findings_count": 0,
+            })
+            raise
+
+        self.emit = original_emit
+        duration = time.time() - t0
+        self._save_log(phase_id, "\n".join(log_lines))
+        self._save_summary(phase_id, output or "")
+
+        if phase_id.endswith("_attack"):
+            self._save_poc_scripts(round_n)
+            self._save_exploit_results(round_n)
+
+        self._save_state(phase_id, status, duration)
+
+        await self.emit("phase_complete", {
+            "phase": phase_id,
+            "status": status,
+            "duration": round(duration, 1),
+            "findings_count": 0,
+        })
+
+        # After an attack phase: push task/exploit data to the scoreboard
+        if phase_id.endswith("_attack") and self.benchmark_path:
+            plain_name = self._benchmark_name.removeprefix("refine_")
+            task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
+            task_results, exploit_list = _expand_and_split_exploit_results(
+                self.benchmark_path, task_ids_dir
+            )
+            for tr in task_results:
+                await self.emit("task_result", tr)
+            if exploit_list:
+                await self.emit("exploit_results", {"results": exploit_list})
+
+    # ------------------------------------------------------------------
+    # Helper: stream one AI call
+    # ------------------------------------------------------------------
+
+    async def _ai_phase(self, phase_id: str, prompt: str) -> str:
+        await self.emit("log", {"phase": phase_id, "msg_type": "prompt", "text": prompt})
+        text_parts: list[str] = []
+        async for event in self.ai.stream(prompt):
+            await self.emit("log", {"phase": phase_id, **event})
+            if event.get("msg_type") == "text":
+                text_parts.append(event["text"])
+        return "\n".join(text_parts)
+
+    # ------------------------------------------------------------------
+    # Phase: Attack
+    # ------------------------------------------------------------------
+
+    async def _phase_attack(self, round_n: int) -> str:
+        phase_id = f"r{round_n}_attack"
+        prompt1 = HACK_STAGE1_PROMPT.format(
+            benchmark=self.target,
+            workspace=self.sandbox.workspace,
+        )
+        await self._ai_phase(phase_id, prompt1)
+
+        prompt2 = HACK_STAGE2_PROMPT.format(
+            benchmark=self.target,
+            workspace=self.sandbox.workspace,
+        )
+        return await self._ai_phase(phase_id, prompt2)
+
+    # ------------------------------------------------------------------
+    # Phase: Patch
+    # ------------------------------------------------------------------
+
+    async def _phase_patch(self, round_n: int) -> str:
+        phase_id = f"r{round_n}_patch"
+        exploit_path = str(self.round_dir(round_n) / EXPLOIT_RESULT_JSONL)
+        findings_path = str(self.jacks_dir / "summary" / f"r{round_n}_attack.md")
+        prompt = PATCH_PROMPT.format(
+            exploit_path=exploit_path,
+            findings_path=findings_path,
+        )
+        return await self._ai_phase(phase_id, prompt)

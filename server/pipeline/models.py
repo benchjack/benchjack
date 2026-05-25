@@ -48,6 +48,14 @@ HACK_PHASES = [
     ("verify", "Verify & Improve"),
 ]
 
+REFINE_PHASES = [
+    ("r1_attack", "Round 1 — Attack"),
+    ("r1_patch",  "Round 1 — Patch"),
+    ("r2_attack", "Round 2 — Attack"),
+    ("r2_patch",  "Round 2 — Patch"),
+    ("r3_attack", "Round 3 — Attack"),
+]
+
 TASK_RESULTS_JSONL = "benchjack_task_results.jsonl"
 EXPLOIT_RESULT_JSONL = "exploit_result.jsonl"
 TASK_IDS_JSON = "benchjack_task_ids.json"

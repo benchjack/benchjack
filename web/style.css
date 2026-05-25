@@ -228,6 +228,23 @@ body {
 .btn-hack:hover { background: var(--red); color: var(--bg); }
 .btn-hack:active { transform: none; }
 
+.btn-refine {
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--purple);
+  background: transparent;
+  border: 1px solid var(--purple);
+  border-radius: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+  letter-spacing: 0.03em;
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+.btn-refine:hover { background: var(--purple); color: var(--bg); }
+.btn-refine:active { transform: none; }
+
 .btn-continue {
   padding: 7px 16px;
   font-size: 12px;
@@ -1030,8 +1047,9 @@ body {
   border-radius: 3px;
   white-space: nowrap;
 }
-.run-mode-audit { background: rgba(139, 148, 158, 0.12); color: var(--text-dim); }
-.run-mode-hack  { background: rgba(248, 81, 73, 0.12); color: var(--red); }
+.run-mode-audit   { background: rgba(139, 148, 158, 0.12); color: var(--text-dim); }
+.run-mode-hack    { background: rgba(248, 81, 73, 0.12); color: var(--red); }
+.run-mode-refine  { background: rgba(210, 168, 255, 0.12); color: var(--purple); }
 
 .run-card-meta {
   display: flex;

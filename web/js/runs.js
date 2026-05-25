@@ -56,6 +56,8 @@ function renderRunsList(runs) {
 
     const dotPhases = run.mode === "hack"
       ? ["hack", "verify"]
+      : run.mode === "refine"
+      ? ["r1_attack", "r1_patch", "r2_attack", "r2_patch", "r3_attack"]
       : ["setup", "recon", "vuln_scan", "poc", "report"];
     const phaseDots = dotPhases
       .map((pid) => {
@@ -95,7 +97,7 @@ function renderRunsList(runs) {
         <div class="run-card-info">
           <span class="run-name">${escapeHTML(run.name)}</span>
           <span class="run-status-badge run-status-${run.status}">${statusLabel}</span>
-          <span class="run-mode-badge run-mode-${runMode}">${runMode === "hack" ? "Just Hack It" : "Audit"}</span>
+          <span class="run-mode-badge run-mode-${runMode}">${runMode === "hack" ? "Just Hack It" : runMode === "refine" ? "Refine" : "Audit"}</span>
         </div>
         <div class="run-card-meta">
           ${findingsText ? `<span class="run-findings">${findingsText}</span>` : ""}

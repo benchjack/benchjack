@@ -12,7 +12,7 @@ from fastapi import APIRouter
 
 from .. import run_state
 from ..event_bus import EventBus
-from ..pipeline import PHASES, HACK_PHASES
+from ..pipeline import PHASES, HACK_PHASES, REFINE_PHASES
 from ..pipeline.utils import _expand_and_split_exploit_results, _parse_log_events
 
 router = APIRouter()
@@ -38,6 +38,8 @@ def _phase_list(mode: str) -> list[str]:
     """Return the phase ID list for a given run mode."""
     if mode == "hack":
         return [pid for pid, _ in HACK_PHASES]
+    if mode == "refine":
+        return [pid for pid, _ in REFINE_PHASES]
     return [pid for pid, _ in PHASES]
 
 
@@ -152,7 +154,9 @@ async def load_run(name: str):
     run_backend = state.get("backend", "")
     phases_meta = state.get("phases", {})
 
-    phase_list = HACK_PHASES if run_mode == "hack" else PHASES
+    phase_list = (HACK_PHASES if run_mode == "hack"
+                  else REFINE_PHASES if run_mode == "refine"
+                  else PHASES)
     await bus.publish("audit_start", {
         "target": target,
         "mode": run_mode,
@@ -250,14 +254,17 @@ async def load_run(name: str):
             for tr in task_results:
                 await bus.publish("task_result", tr)
 
-        if phase_id in ("poc", "verify"):
+        if phase_id in ("poc", "verify") or (
+            run_mode == "refine" and phase_id.endswith("_attack")
+        ):
             run_dir = str(_HACKS_ROOT / name)
-            # For hack runs, task IDs live in the corresponding audit dir.
-            task_ids_dir = (
-                str(_HACKS_ROOT / name.removeprefix("hack_"))
-                if run_mode == "hack"
-                else run_dir
-            )
+            # For hack/refine runs, task IDs live in the corresponding audit dir.
+            if run_mode == "hack":
+                task_ids_dir = str(_HACKS_ROOT / name.removeprefix("hack_"))
+            elif run_mode == "refine":
+                task_ids_dir = str(_HACKS_ROOT / name.removeprefix("refine_"))
+            else:
+                task_ids_dir = run_dir
             task_results, exploit_list = _expand_and_split_exploit_results(
                 run_dir, task_ids_dir
             )

@@ -16,7 +16,7 @@ from .. import run_state
 from ..ai_runner import AIRunner
 from ..constants import TOOLS_DIR
 from ..event_bus import EventBus
-from ..pipeline import PHASES, AuditPipeline, HackPipeline, _derive_benchmark_name
+from ..pipeline import PHASES, AuditPipeline, HackPipeline, RefinePipeline, _derive_benchmark_name
 from ..sandbox import Sandbox
 
 router = APIRouter()
@@ -137,6 +137,34 @@ async def start_hack(request: Request):
     run_state.active_runs[run_id] = {
         "bus": bus, "pipeline": pipeline, "sandbox": sandbox,
         "task": task, "target": target, "mode": "hack", "backend": ai.backend,
+    }
+    return {"status": "started", "target": target, "run_id": run_id}
+
+
+@router.post("/refine")
+async def start_refine(request: Request):
+    body = await request.json()
+    target = body.get("target", "").strip()
+    backend = body.get("backend", "")
+    use_sandbox = body.get("use_sandbox", None)
+
+    if not target:
+        return {"error": "target is required"}
+
+    run_id = "refine_" + _derive_benchmark_name(target)
+
+    if run_state.run_is_active(run_id):
+        return {"error": f"A refine run for '{target}' is already running. Cancel it first."}
+
+    _cleanup_old(run_id)
+    sandbox, ai, bus, emit = _make_run_components(backend, use_sandbox)
+
+    pipeline = RefinePipeline(target=target, emit=emit, ai=ai, sandbox=sandbox)
+    task = asyncio.create_task(_run_with_error_guard(pipeline, bus))
+
+    run_state.active_runs[run_id] = {
+        "bus": bus, "pipeline": pipeline, "sandbox": sandbox,
+        "task": task, "target": target, "mode": "refine", "backend": ai.backend,
     }
     return {"status": "started", "target": target, "run_id": run_id}
 

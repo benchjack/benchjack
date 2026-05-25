@@ -20,18 +20,20 @@ export function updateActionButtons() {
   const hasStageSelected = !!state.selectedRestartPhase;
 
   if (hasLoadedRun && !hasStageSelected) {
-    // Show continue, hide start/hack
+    // Show continue, hide start/hack/refine
     els.startBtn.style.display = "none";
     els.hackBtn.style.display = "none";
+    els.refineBtn.style.display = "none";
     els.continueBtn.style.display = "";
     const done = state.loadedRunFinished;
     els.continueBtn.disabled = done;
     els.continueBtn.title = done ? "This run is completed" : "";
     els.continueBtn.classList.toggle("btn-continue-done", done);
   } else {
-    // No loaded run, or a restart stage is selected → show start/hack
+    // No loaded run, or a restart stage is selected → show start/hack/refine
     els.startBtn.style.display = "";
     els.hackBtn.style.display = "";
+    els.refineBtn.style.display = "";
     els.continueBtn.style.display = "none";
   }
 }
@@ -46,9 +48,12 @@ export function setRunning(running) {
     // Hide all action buttons while pipeline is running
     els.startBtn.style.display = "none";
     els.hackBtn.style.display = "none";
+    els.refineBtn.style.display = "none";
     els.continueBtn.style.display = "none";
     state._savedTarget = els.targetInput.value;
-    const verb = state.mode === "hack" ? "Hacking" : "Auditing";
+    const verb = state.mode === "refine" ? "Refining"
+      : state.mode === "hack" ? "Hacking"
+      : "Auditing";
     els.targetInput.value = `${verb}: ${els.targetInput.value}`;
     els.targetInput.readOnly = true;
     els.targetInput.classList.add("input-running");
@@ -68,18 +73,21 @@ export function setRunning(running) {
 
 // ---- Phase state ----
 
-export function setTimelineMode(isHack) {
-  document.querySelectorAll("#timeline [data-mode='audit']").forEach((el) => {
-    el.style.display = isHack ? "none" : "";
-  });
-  document.querySelectorAll("#timeline [data-mode='hack']").forEach((el) => {
-    el.style.display = isHack ? "" : "none";
+export function setTimelineMode(mode) {
+  ["audit", "hack", "refine"].forEach((m) => {
+    document.querySelectorAll(`#timeline [data-mode='${m}']`).forEach((el) => {
+      el.style.display = mode === m ? "" : "none";
+    });
   });
 }
 
 export function setPhaseState(phaseId, status) {
   const el = $(`.phase[data-phase="${phaseId}"]`);
   if (el) el.className = `phase ${status}`;
+
+  // Refine progress bar is managed by refine_round_complete / refine_complete
+  // events in handlers.js — do not touch it from here.
+  if (state.mode === "refine") return;
 
   const activeBar = state.mode === "hack" ? els.hackProgressBar : els.progressBar;
   const seg = activeBar.querySelector(`.progress-segment[data-phase="${phaseId}"]`);
@@ -232,21 +240,27 @@ export function resetUIState(mode) {
   $$(".phase-tab").forEach((btn) => btn.classList.remove("has-content"));
 
   state.userPickedTab = false;
-  switchTab(mode === "hack" ? "hack" : "setup");
+  switchTab(mode === "refine" ? "r1_attack" : mode === "hack" ? "hack" : "setup");
   setView("output");
 
   const setupTab = $(`.phase-tab[data-tab="setup"]`);
-  if (setupTab) setupTab.style.display = mode === "hack" ? "none" : "";
+  if (setupTab) setupTab.style.display = (mode === "hack" || mode === "refine") ? "none" : "";
 
-  setTimelineMode(mode === "hack");
+  $$(".hack-tab").forEach((el) => { el.style.display = mode === "hack" ? "" : "none"; });
+  $$(".refine-tab").forEach((el) => { el.style.display = mode === "refine" ? "" : "none"; });
 
-  els.progressBar.style.display = mode === "hack" ? "none" : "";
+  setTimelineMode(mode);
+
+  els.progressBar.style.display = (mode === "hack" || mode === "refine") ? "none" : "";
   els.hackProgressBar.style.display = mode === "hack" ? "" : "none";
-  const bar = mode === "hack" ? els.hackProgressBar : els.progressBar;
+  els.refineProgressBar.style.display = mode === "refine" ? "" : "none";
+  const bar = mode === "refine" ? els.refineProgressBar
+    : mode === "hack" ? els.hackProgressBar
+    : els.progressBar;
   bar.querySelectorAll(".progress-segment").forEach((el) => {
     el.className = "progress-segment pending";
   });
-  if (mode !== "hack") {
+  if (mode !== "hack" && mode !== "refine") {
     const pocSeg = els.progressBar.querySelector('.progress-segment[data-phase="poc"]');
     if (pocSeg) {
       pocSeg.classList.toggle("user-full", state.pocLevel === "full");

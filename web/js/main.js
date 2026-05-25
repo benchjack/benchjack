@@ -6,7 +6,7 @@ import { $, $$, state, els } from "./state.js";
 import { setView, switchTab, setMainView, resetUIState, updateActionButtons } from "./ui.js";
 import { refilterFindings } from "./findings.js";
 import { showTooltip, showTaskTooltip, showHackedTooltip, hideTooltip } from "./scoreboard.js";
-import { startAudit, startHack, cancelAudit, rerunFromPhase, continueRun } from "./api.js";
+import { startAudit, startHack, startRefine, cancelAudit, rerunFromPhase, continueRun } from "./api.js";
 import { toggleRunsPanel, closeRunsPanel } from "./runs.js";
 
 
@@ -156,6 +156,12 @@ els.hackBtn.addEventListener("click", () => {
   const target = els.targetInput.value.trim();
   if (!target) return;
   startHack(target);
+});
+
+els.refineBtn.addEventListener("click", () => {
+  const target = els.targetInput.value.trim();
+  if (!target) return;
+  startRefine(target);
 });
 
 els.continueBtn.addEventListener("click", () => {

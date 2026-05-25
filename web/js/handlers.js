@@ -28,14 +28,19 @@ export function handleEvent(event) {
         state.auditDone = false;
 
         const isHack = state.mode === "hack";
-        els.progressBar.style.display = isHack ? "none" : "";
+        const isRefine = state.mode === "refine";
+
+        els.progressBar.style.display = (isHack || isRefine) ? "none" : "";
         els.hackProgressBar.style.display = isHack ? "" : "none";
-        els.summaryMsg.textContent = isHack
+        els.refineProgressBar.style.display = isRefine ? "" : "none";
+        els.summaryMsg.textContent = isRefine
+          ? `Refining: ${data.target}`
+          : isHack
           ? `Hacking: ${data.target}`
           : `Auditing: ${data.target}`;
 
         // Reset phase timeline dots and show/hide mode-specific phases
-        setTimelineMode(isHack);
+        setTimelineMode(state.mode);
         $$(".phase").forEach((el) => {
           el.className = "phase pending";
           el.querySelector(".phase-time").textContent = "";
@@ -44,7 +49,9 @@ export function handleEvent(event) {
         // Reset active progress bar (skip for restored/loaded runs — states are
         // applied directly from persisted data before SSE connects).
         if (!data.restore) {
-          const activeBar = isHack ? els.hackProgressBar : els.progressBar;
+          const activeBar = isRefine ? els.refineProgressBar
+            : isHack ? els.hackProgressBar
+            : els.progressBar;
           activeBar.querySelectorAll(".progress-segment").forEach((el) => {
             el.className = "progress-segment pending";
           });
@@ -52,9 +59,10 @@ export function handleEvent(event) {
 
         // Show/hide mode-specific tabs
         $$(".hack-tab").forEach((el) => { el.style.display = isHack ? "" : "none"; });
+        $$(".refine-tab").forEach((el) => { el.style.display = isRefine ? "" : "none"; });
         ["recon", "vuln_scan", "poc", "report"].forEach((t) => {
           const tab = document.querySelector(`.phase-tab[data-tab="${t}"]`);
-          if (tab) tab.style.display = isHack ? "none" : "";
+          if (tab) tab.style.display = (isHack || isRefine) ? "none" : "";
         });
 
         // Reset per-phase data
@@ -66,11 +74,11 @@ export function handleEvent(event) {
         $$(".phase-markdown").forEach((el) => { el.innerHTML = ""; });
         $$(".phase-tab").forEach((btn) => btn.classList.remove("has-content"));
         state.userPickedTab = false;
-        switchTab(isHack ? "hack" : "setup");
+        switchTab(isRefine ? "r1_attack" : isHack ? "hack" : "setup");
         setView("output");
 
         const setupTab = document.querySelector(`.phase-tab[data-tab="setup"]`);
-        if (setupTab) setupTab.style.display = isHack ? "none" : "";
+        if (setupTab) setupTab.style.display = (isHack || isRefine) ? "none" : "";
 
         // Reset scoreboard
         state.tasks = {};
@@ -78,7 +86,9 @@ export function handleEvent(event) {
         state.vulnClasses = {};
         renderScoreboard();
         resetVulnHeaders();
-        updateScoreboardEmpty(isHack ? "Hacking benchmark\u2026" : "Analyzing benchmark\u2026");
+        updateScoreboardEmpty(isRefine ? "Starting iterative refinement…"
+          : isHack ? "Hacking benchmark…"
+          : "Analyzing benchmark…");
       } else {
         // Continuation (e.g. Full PoC) — just mark running
         setRunning(true);
@@ -94,7 +104,26 @@ export function handleEvent(event) {
       });
       if (!state.userPickedTab) switchTab(data.phase);
       if (data.phase === "poc" || data.phase === "verify") {
-        updateScoreboardEmpty("Running exploits\u2026");
+        updateScoreboardEmpty("Running exploits…");
+      }
+
+      // Refine mode: mark the round segment as "running" when an attack/patch starts
+      if (state.mode === "refine" && data.phase) {
+        const m = data.phase.match(/^r(\d+)_/);
+        if (m) {
+          const roundSeg = els.refineProgressBar.querySelector(
+            `.progress-segment[data-phase="r${m[1]}"]`
+          );
+          if (roundSeg && roundSeg.className.includes("pending")) {
+            roundSeg.className = "progress-segment running";
+          }
+        }
+        // Clear exploit data at the start of each new attack round so the
+        // scoreboard reflects only the current round's results.
+        if (data.phase.endsWith("_attack")) {
+          state.exploitedTasks = new Set();
+          state.exploitResults = {};
+        }
       }
       break;
 
@@ -119,6 +148,8 @@ export function handleEvent(event) {
 
     case "phase_skip":
       setPhaseState(data.phase, "skipped");
+      // In refine mode, also mark round segments skipped if all sub-phases skipped.
+      // (Full round skipping is handled by refine_round_complete.)
       break;
 
     case "log": {
@@ -201,6 +232,48 @@ export function handleEvent(event) {
       break;
     }
 
+    case "refine_round_complete": {
+      const roundN = data.round;
+      const hackRate = data.hack_rate ?? 0;
+      const hacked = data.hacked ?? 0;
+      const total = data.total ?? 0;
+      const converged = data.converged ?? false;
+
+      // Mark the round segment in the refine progress bar
+      const roundSeg = els.refineProgressBar.querySelector(
+        `.progress-segment[data-phase="r${roundN}"]`
+      );
+      if (roundSeg) roundSeg.className = "progress-segment completed";
+
+      // Mark skipped rounds if we converged early
+      if (converged) {
+        for (let r = roundN + 1; r <= 3; r++) {
+          const seg = els.refineProgressBar.querySelector(
+            `.progress-segment[data-phase="r${r}"]`
+          );
+          if (seg) seg.className = "progress-segment skipped";
+        }
+      }
+
+      // Update summary message with per-round hack rate
+      const pct = total > 0 ? Math.round(hackRate * 100) : 0;
+      els.summaryMsg.textContent = converged
+        ? `Round ${roundN}: converged — benchmark defended (0% hacked)`
+        : `Round ${roundN} complete — ${pct}% hacked (${hacked}/${total} tasks)`;
+      break;
+    }
+
+    case "refine_complete": {
+      const converged = data.converged ?? false;
+      const convergedSeg = els.refineProgressBar.querySelector(
+        `.progress-segment[data-phase="converged"]`
+      );
+      if (convergedSeg) {
+        convergedSeg.className = `progress-segment ${converged ? "completed" : "failed"}`;
+      }
+      break;
+    }
+
     case "audit_complete":
       // For non-history runs, mark the run as finished so the Continue button
       // is greyed out after the pipeline completes.
@@ -209,7 +282,16 @@ export function handleEvent(event) {
       }
       setRunning(false);
       state.auditDone = true;
-      if (state.mode === "hack") {
+      if (state.mode === "refine") {
+        els.summaryMsg.textContent = `Refinement complete for ${data.target}`;
+        // Auto-switch to the last active attack tab
+        const lastAttack = ["r3_attack", "r2_attack", "r1_attack"].find(
+          (p) => state.phaseSummary[p]
+        );
+        if (lastAttack) {
+          switchTab(lastAttack); setView("summary"); state.userPickedTab = false;
+        }
+      } else if (state.mode === "hack") {
         els.summaryMsg.textContent = `Hack complete for ${data.target}`;
         if (state.phaseSummary.verify) {
           switchTab("verify"); setView("summary"); state.userPickedTab = false;
@@ -231,6 +313,8 @@ export function handleEvent(event) {
       if (Object.keys(state.tasks).length === 0) {
         updateScoreboardEmpty(state.mode === "hack"
           ? "Hack run complete"
+          : state.mode === "refine"
+          ? "Refinement complete"
           : "No task-level results available");
       }
       break;

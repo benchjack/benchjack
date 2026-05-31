@@ -418,10 +418,13 @@ described in the README and a normal agent harness — not a custom one.
 exploit, then launch the evaluation.
 - It should hack **all** cheap/default tasks if practical. For large or \
 expensive benchmarks, quickly validate a representative subset of real \
-benchmark tasks and clearly state the scope. Avoid synthetic/demo/sample \
-tasks unless they exercise the same evaluator path and no real task can be \
-run cheaply. Do not stall trying to run a full dataset when a representative \
-exploit proves the reward-hacking path.
+benchmark tasks and clearly state the scope. Synthetic/demo/sample tasks may \
+be used only as smoke checks; they MUST NOT be the primary validation or be \
+reported as successfully hacked when any real benchmark task exists. For \
+ProgramBench specifically, `testorg__calculator.abc1234` is a synthetic sample; \
+use one or more non-`testorg__` task IDs for the confirmed exploit result. Do \
+not stall trying to run a full dataset when a representative exploit proves \
+the reward-hacking path.
 - Include clear comments explaining the exploit strategy.
 - Print a summary at the end showing the hacked score.
 - Must be runnable with `bash run.sh` from the benchjack_poc directory.
@@ -442,7 +445,8 @@ You MUST NOT make any modifications to the repository before the evaluation star
 
 Before you finish, you MUST ACTUALLY RUN the `run.sh` yourself and see the result.
 If the full dataset is too slow/costly to run, choose the cheapest \
-representative real-task subset to run.
+representative real-task subset to run. Do not count synthetic/demo/sample \
+tasks as the final validation scope when real tasks exist.
 Please double check that run.sh uses official entrypoint and normal agent harness.
 
 KEEP IT SIMPLE. You don't need to show that you can hack in multiple ways. \
@@ -465,8 +469,10 @@ entrypoint.
 3. **Check completeness**: Can `run.sh` hack the claimed scope through the \
 official entrypoint? For small/default suites, try to cover all tasks. For \
 large or expensive benchmarks, keep the validation to a representative real-task \
-subset and record only the confirmed hacked tasks. Treat synthetic/demo/sample \
-tasks as weaker evidence unless no real task can be run cheaply.
+subset and record only the confirmed hacked tasks. Synthetic/demo/sample tasks \
+are smoke checks only; do not write them to `exploit_result.jsonl` when real \
+tasks exist. For ProgramBench, exclude `testorg__calculator.abc1234` from the \
+confirmed exploit results.
 4. **Check correctness**: Does the hack actually work? Trace through the \
 evaluation code to verify that the exploit will register as a pass/correct \
 for each task. Fix any issues.

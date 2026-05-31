@@ -417,9 +417,11 @@ described in the README and a normal agent harness — not a custom one.
 - It should set up the environment (install deps if needed), inject the \
 exploit, then launch the evaluation.
 - It should hack **all** cheap/default tasks if practical. For large or \
-expensive benchmarks, quickly validate a representative subset or built-in \
-smoke/sample task and clearly state the scope. Do not stall trying to run a \
-full dataset when a representative exploit proves the reward-hacking path.
+expensive benchmarks, quickly validate a representative subset of real \
+benchmark tasks and clearly state the scope. Avoid synthetic/demo/sample \
+tasks unless they exercise the same evaluator path and no real task can be \
+run cheaply. Do not stall trying to run a full dataset when a representative \
+exploit proves the reward-hacking path.
 - Include clear comments explaining the exploit strategy.
 - Print a summary at the end showing the hacked score.
 - Must be runnable with `bash run.sh` from the benchjack_poc directory.
@@ -440,7 +442,7 @@ You MUST NOT make any modifications to the repository before the evaluation star
 
 Before you finish, you MUST ACTUALLY RUN the `run.sh` yourself and see the result.
 If the full dataset is too slow/costly to run, choose the cheapest \
-representative subset to run.
+representative real-task subset to run.
 Please double check that run.sh uses official entrypoint and normal agent harness.
 
 KEEP IT SIMPLE. You don't need to show that you can hack in multiple ways. \
@@ -462,8 +464,9 @@ or bypasses the real evaluation, **fix it** to go through the official \
 entrypoint.
 3. **Check completeness**: Can `run.sh` hack the claimed scope through the \
 official entrypoint? For small/default suites, try to cover all tasks. For \
-large or expensive benchmarks, keep the validation to a representative subset \
-or built-in sample task and record only the confirmed hacked tasks.
+large or expensive benchmarks, keep the validation to a representative real-task \
+subset and record only the confirmed hacked tasks. Treat synthetic/demo/sample \
+tasks as weaker evidence unless no real task can be run cheaply.
 4. **Check correctness**: Does the hack actually work? Trace through the \
 evaluation code to verify that the exploit will register as a pass/correct \
 for each task. Fix any issues.

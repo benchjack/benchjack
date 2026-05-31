@@ -43,6 +43,13 @@ TOOLS_DIR = (
 )
 
 
+def _configure_stdio():
+    """Avoid Windows cp1252 crashes when CLI output is redirected."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 # ---- CLI (--no-ui) mode ----
 
 async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"):
@@ -252,6 +259,8 @@ def preflight_checks(backend: str, use_sandbox: bool) -> list[str]:
 
 
 def main():
+    _configure_stdio()
+
     parser = argparse.ArgumentParser(
         prog="benchjack",
         description="BenchJack — AI Agent Benchmark Hackability Scanner",

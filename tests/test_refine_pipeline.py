@@ -171,3 +171,89 @@ async def test_refine_phase_failure_is_marked_and_raised(tmp_path, monkeypatch):
     assert ("error", {"phase": "r1_attack", "message": "backend exploded"}) in events
     state = json.loads((tmp_path / "hacks" / "refine_sample-bench" / "state.json").read_text())
     assert state["phases"]["r1_attack"]["status"] == "failed"
+
+
+def test_refine_reset_workspace_retries_permission_error(tmp_path, monkeypatch):
+    """Windows can briefly deny deleting cloned Git pack files."""
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    events = []
+
+    async def emit(event_type, data):
+        events.append((event_type, data))
+
+    sandbox = Sandbox(str(tmp_path / "tools"), enabled=False)
+    pipeline = RefinePipeline("sample-bench", emit, FakeAI(), sandbox)
+    dest = pipeline.output_dir / "repo"
+    dest.mkdir(parents=True)
+    (dest / "old.txt").write_text("old\n")
+
+    real_rmtree = refine_module.shutil.rmtree
+    calls = {"count": 0}
+
+    def flaky_rmtree(path, onerror=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise PermissionError("locked")
+        return real_rmtree(path, onerror=onerror)
+
+    monkeypatch.setattr(refine_module.shutil, "rmtree", flaky_rmtree)
+
+    pipeline._reset_workspace(dest)
+
+    assert calls["count"] == 2
+    assert dest.exists()
+    assert not (dest / "old.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_refine_phase_marks_running_at_start(tmp_path, monkeypatch):
+    """Reruns should not show a stale failed phase while work is active."""
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    events = []
+
+    async def emit(event_type, data):
+        events.append((event_type, data))
+
+    sandbox = Sandbox(str(tmp_path / "tools"), enabled=False)
+    pipeline = RefinePipeline("sample-bench", emit, FakeAI(), sandbox)
+    pipeline._ensure_dirs()
+    pipeline.benchmark_path = str(pipeline.output_dir / "repo")
+    pipeline._save_state("r1_attack", "failed", 10.0)
+
+    async def handler():
+        state = json.loads((pipeline.jacks_dir / "state.json").read_text())
+        assert state["phases"]["r1_attack"]["status"] == "running"
+        return "done"
+
+    await pipeline._run_phase("r1_attack", "Round 1 - Attack", handler)
+
+
+def test_refine_remove_readonly_unlinks_inaccessible_symlink(tmp_path):
+    """ProgramBench can leave WSL venv links that Windows cannot scan."""
+    link = tmp_path / "lib64"
+    try:
+        refine_module.os.symlink(tmp_path / "missing", link, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this Windows host")
+
+    def inaccessible(_path):
+        raise OSError("cannot scan")
+
+    RefinePipeline._handle_remove_readonly(inaccessible, str(link), None)
+
+    assert not refine_module.os.path.lexists(link)
+
+
+def test_refine_remove_readonly_removes_inaccessible_directory(tmp_path):
+    """Windows reports WSL-created junctions as inaccessible directories."""
+    path = tmp_path / "lib64"
+    path.mkdir()
+
+    def inaccessible(_path):
+        raise OSError("cannot scan")
+
+    RefinePipeline._handle_remove_readonly(inaccessible, str(path), None)
+
+    assert not path.exists()

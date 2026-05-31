@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -134,8 +135,32 @@ class RefinePipeline:
         if parent != output_dir:
             raise RuntimeError(f"Refusing to reset unexpected workspace: {dest}")
         if dest.exists():
-            shutil.rmtree(dest)
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(dest, onerror=self._handle_remove_readonly)
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.5)
         dest.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _handle_remove_readonly(func, path, exc_info):
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(path)
+        except OSError:
+            if Path(path).is_symlink():
+                os.unlink(path)
+                return
+            if os.path.lexists(path):
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    os.unlink(path)
+                return
+            raise
 
     def _copy_local_target(self, src: Path, dest: Path):
         src_resolved = src.resolve()
@@ -339,6 +364,7 @@ class RefinePipeline:
     async def _run_phase(self, phase_id: str, phase_label: str, handler, *, round_n: int = 1):
         t0 = time.time()
         await self.emit("phase_start", {"phase": phase_id, "label": phase_label})
+        self._save_state(phase_id, "running", 0.0)
 
         log_lines: list[str] = []
         original_emit = self.emit

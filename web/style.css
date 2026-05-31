@@ -321,6 +321,14 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   font-family: var(--font-mono);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.refine-round-custom input::-webkit-outer-spin-button,
+.refine-round-custom input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
 .btn-continue {

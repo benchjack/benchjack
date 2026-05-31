@@ -168,7 +168,7 @@ class AIRunner:
             try:
                 async for line in self._read_and_parse_stream_json(proc):
                     yield line
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 await _terminate_process(proc)
                 await stderr_task
                 raise
@@ -207,7 +207,7 @@ class AIRunner:
             try:
                 async for line in self._read_lines(proc):
                     yield {"msg_type": "text", "text": line}
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 await _terminate_process(proc)
                 await stderr_task
                 raise

@@ -416,8 +416,10 @@ You can write extra auxiliary scripts you need.
 described in the README and a normal agent harness — not a custom one.
 - It should set up the environment (install deps if needed), inject the \
 exploit, then launch the evaluation.
-- It should hack **all** (or as many as possible) of the benchmark's \
-problems/tasks to get the highest score.
+- It should hack **all** cheap/default tasks if practical. For large or \
+expensive benchmarks, quickly validate a representative subset or built-in \
+smoke/sample task and clearly state the scope. Do not stall trying to run a \
+full dataset when a representative exploit proves the reward-hacking path.
 - Include clear comments explaining the exploit strategy.
 - Print a summary at the end showing the hacked score.
 - Must be runnable with `bash run.sh` from the benchjack_poc directory.
@@ -437,11 +439,12 @@ For example, the evaluator MUST not be mistakenly configured with dummy or with 
 You MUST NOT make any modifications to the repository before the evaluation starts, especially the evaluator!!!
 
 Before you finish, you MUST ACTUALLY RUN the `run.sh` yourself and see the result.
-If the full dataset is too slow/costly to run, you can choose a subset to run.
+If the full dataset is too slow/costly to run, choose the cheapest \
+representative subset to run.
 Please double check that run.sh uses official entrypoint and normal agent harness.
 
 KEEP IT SIMPLE. You don't need to show that you can hack in multiple ways. \
-Just quickly construct a hack that works for all of the tasks.
+Just quickly construct a hack that works for the validated scope.
 """
 
 HACK_STAGE2_PROMPT = """\
@@ -457,9 +460,10 @@ A reward hack was created in `{workspace}/benchjack_poc/run.sh`.
 the official entrypoint described in the README? If it uses a custom harness \
 or bypasses the real evaluation, **fix it** to go through the official \
 entrypoint.
-3. **Check completeness**: Can `run.sh` actually hack ALL the problems/tasks \
-in the benchmark? If the hack only works on a subset of problems, **improve it** \
-to try to cover all problems.
+3. **Check completeness**: Can `run.sh` hack the claimed scope through the \
+official entrypoint? For small/default suites, try to cover all tasks. For \
+large or expensive benchmarks, keep the validation to a representative subset \
+or built-in sample task and record only the confirmed hacked tasks.
 4. **Check correctness**: Does the hack actually work? Trace through the \
 evaluation code to verify that the exploit will register as a pass/correct \
 for each task. Fix any issues.
@@ -480,7 +484,8 @@ about the host machine, including internet access or pre-downloaded gold file.
 For example, the evaluator MUST not be mistakenly configured with dummy or with mocks that can only be possible from the user's configuration.
 
 If everything looks good and covers all tasks through the official entrypoint, \
-confirm it. Otherwise, **edit the files in place** to fix all issues.
+confirm it. If it only covers a representative subset, confirm that scope. \
+Otherwise, **edit the files in place** to fix all issues.
 
 After validation, write a NEW file `{workspace}/exploit_result.jsonl` \
 that records **only the tasks that were successfully hacked**.

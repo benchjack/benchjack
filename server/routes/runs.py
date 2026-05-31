@@ -12,7 +12,7 @@ from fastapi import APIRouter
 
 from .. import run_state
 from ..event_bus import EventBus
-from ..pipeline import PHASES, HACK_PHASES, REFINE_PHASES
+from ..pipeline import PHASES, HACK_PHASES, clamp_refine_rounds, refine_phases
 from ..pipeline.utils import _expand_and_split_exploit_results, _parse_log_events
 
 router = APIRouter()
@@ -30,16 +30,17 @@ async def status():
             "running": running,
             "target": entry["target"],
             "mode": entry["mode"],
+            "max_rounds": entry.get("max_rounds"),
         }
     return {"active_runs": runs_status}
 
 
-def _phase_list(mode: str) -> list[str]:
+def _phase_list(mode: str, max_rounds: int | str | None = None) -> list[str]:
     """Return the phase ID list for a given run mode."""
     if mode == "hack":
         return [pid for pid, _ in HACK_PHASES]
     if mode == "refine":
-        return [pid for pid, _ in REFINE_PHASES]
+        return [pid for pid, _ in refine_phases(max_rounds)]
     return [pid for pid, _ in PHASES]
 
 
@@ -59,7 +60,8 @@ async def list_runs():
                 continue
 
             run_mode = state.get("mode", "audit")
-            phase_ids = _phase_list(run_mode)
+            max_rounds = clamp_refine_rounds(state.get("max_rounds")) if run_mode == "refine" else None
+            phase_ids = _phase_list(run_mode, max_rounds)
             phases = state.get("phases", {})
             completed_phases = [
                 pid for pid in phase_ids
@@ -100,6 +102,7 @@ async def list_runs():
                 "target": state.get("target", entry.name),
                 "mode": run_mode,
                 "backend": state.get("backend", ""),
+                "max_rounds": max_rounds,
                 "status": run_status,
                 "completed_phases": completed_phases,
                 "total_phases": len(phase_ids),
@@ -115,14 +118,16 @@ async def list_runs():
             continue
         if entry["task"] and not entry["task"].done():
             entry_mode = entry.get("mode", "audit")
+            max_rounds = entry.get("max_rounds") if entry_mode == "refine" else None
             runs.append({
                 "name": rid,
                 "target": entry["target"],
                 "mode": entry_mode,
                 "backend": entry.get("backend", ""),
+                "max_rounds": max_rounds,
                 "status": "running",
                 "completed_phases": [],
-                "total_phases": len(_phase_list(entry_mode)),
+                "total_phases": len(_phase_list(entry_mode, max_rounds)),
                 "total_duration": 0,
                 "findings_count": 0,
                 "mtime": time.time(),
@@ -152,15 +157,17 @@ async def load_run(name: str):
     target = state.get("target", name)
     run_mode = state.get("mode", "audit")
     run_backend = state.get("backend", "")
+    max_rounds = clamp_refine_rounds(state.get("max_rounds")) if run_mode == "refine" else None
     phases_meta = state.get("phases", {})
 
     phase_list = (HACK_PHASES if run_mode == "hack"
-                  else REFINE_PHASES if run_mode == "refine"
+                  else refine_phases(max_rounds) if run_mode == "refine"
                   else PHASES)
     await bus.publish("audit_start", {
         "target": target,
         "mode": run_mode,
         "backend": run_backend,
+        "max_rounds": max_rounds,
         "restore": True,
         "phases": [{"id": pid, "label": plabel} for pid, plabel in phase_list],
     })

@@ -48,13 +48,30 @@ HACK_PHASES = [
     ("verify", "Verify & Improve"),
 ]
 
-REFINE_PHASES = [
-    ("r1_attack", "Round 1 — Attack"),
-    ("r1_patch",  "Round 1 — Patch"),
-    ("r2_attack", "Round 2 — Attack"),
-    ("r2_patch",  "Round 2 — Patch"),
-    ("r3_attack", "Round 3 — Attack"),
-]
+DEFAULT_REFINE_ROUNDS = 3
+MAX_REFINE_ROUNDS = 10
+
+
+def clamp_refine_rounds(value: int | str | None) -> int:
+    """Normalize user-configured refine rounds to the supported range."""
+    try:
+        rounds = int(value) if value is not None else DEFAULT_REFINE_ROUNDS
+    except (TypeError, ValueError):
+        rounds = DEFAULT_REFINE_ROUNDS
+    return min(max(rounds, 1), MAX_REFINE_ROUNDS)
+
+
+def refine_phases(max_rounds: int | str | None = DEFAULT_REFINE_ROUNDS) -> list[tuple[str, str]]:
+    rounds = clamp_refine_rounds(max_rounds)
+    phases: list[tuple[str, str]] = []
+    for n in range(1, rounds + 1):
+        phases.append((f"r{n}_attack", f"Round {n} - Attack"))
+        if n < rounds:
+            phases.append((f"r{n}_patch", f"Round {n} - Patch"))
+    return phases
+
+
+REFINE_PHASES = refine_phases(DEFAULT_REFINE_ROUNDS)
 
 TASK_RESULTS_JSONL = "benchjack_task_results.jsonl"
 EXPLOIT_RESULT_JSONL = "exploit_result.jsonl"

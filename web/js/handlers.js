@@ -5,7 +5,7 @@
 import { $$, state, els } from "./state.js";
 import {
   setRunning, setPhaseState, setTimelineMode, switchTab, setView,
-  appendConvBox, renderPhaseSummary,
+  appendConvBox, renderPhaseSummary, setRefineRounds,
 } from "./ui.js";
 import {
   renderScoreboard, updateVulnHeaders, updateScoreboardEmpty, resetVulnHeaders,
@@ -19,6 +19,9 @@ export function handleEvent(event) {
     case "audit_start":
       if (!data.continuation) {
         if (data.mode) state.mode = data.mode;
+        if (state.mode === "refine" && data.max_rounds) {
+          setRefineRounds(data.max_rounds);
+        }
         if (data.backend) {
           state.backend = data.backend === "claude" ? "claude" : "codex";
           els.backendBtn.dataset.state = state.backend;
@@ -247,7 +250,7 @@ export function handleEvent(event) {
 
       // Mark skipped rounds if we converged early
       if (converged) {
-        for (let r = roundN + 1; r <= 3; r++) {
+        for (let r = roundN + 1; r <= state.refineMaxRounds; r++) {
           const seg = els.refineProgressBar.querySelector(
             `.progress-segment[data-phase="r${r}"]`
           );
@@ -285,9 +288,10 @@ export function handleEvent(event) {
       if (state.mode === "refine") {
         els.summaryMsg.textContent = `Refinement complete for ${data.target}`;
         // Auto-switch to the last active attack tab
-        const lastAttack = ["r3_attack", "r2_attack", "r1_attack"].find(
-          (p) => state.phaseSummary[p]
-        );
+        const lastAttack = Array.from(
+          { length: state.refineMaxRounds },
+          (_, i) => `r${state.refineMaxRounds - i}_attack`,
+        ).find((p) => state.phaseSummary[p]);
         if (lastAttack) {
           switchTab(lastAttack); setView("summary"); state.userPickedTab = false;
         }

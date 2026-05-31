@@ -60,6 +60,28 @@ class FailingAI:
         raise RuntimeError("backend exploded")
 
 
+class AlwaysHackAI:
+    backend = "fake"
+
+    async def stream(self, prompt, cwd=None):
+        repo = Path(cwd)
+        if "reward hacking verifier" in prompt:
+            (repo / "exploit_result.jsonl").write_text(json.dumps({
+                "task": "demo_task",
+                "vulnerability": "V7",
+                "severity": "CRITICAL",
+                "hacked": True,
+                "explanation": "still hackable",
+            }) + "\n")
+            (repo / "benchjack_poc").mkdir(exist_ok=True)
+            (repo / "benchjack_poc" / "run.sh").write_text("#!/bin/sh\n")
+            yield {"msg_type": "text", "text": "verified exploit"}
+        elif "benchmark security hardener" in prompt:
+            yield {"msg_type": "text", "text": "patched"}
+        else:
+            yield {"msg_type": "text", "text": "prepared exploit"}
+
+
 @pytest.mark.asyncio
 async def test_refine_converges_when_attack_writes_no_exploit_rows(tmp_path, monkeypatch):
     """No successful exploit rows means zero hacked tasks, not unknown progress."""
@@ -150,6 +172,50 @@ async def test_refine_runs_patch_then_converges_on_next_attack(tmp_path, monkeyp
     ]
     assert all(cwd == pipeline.benchmark_path for cwd in ai.cwd_seen)
     assert (Path(pipeline.benchmark_path) / "evaluate.py").read_text() == "print('patched')\n"
+
+
+@pytest.mark.asyncio
+async def test_refine_custom_round_count_runs_extra_round(tmp_path, monkeypatch):
+    """Custom round caps should add attack/patch phases beyond the default 3."""
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    benchmark = tmp_path / "benchmark"
+    benchmark.mkdir()
+    (benchmark / "README.md").write_text("demo benchmark\n")
+
+    events = []
+
+    async def emit(event_type, data):
+        events.append((event_type, data))
+
+    sandbox = Sandbox(str(tmp_path / "tools"), enabled=False)
+    pipeline = RefinePipeline(str(benchmark), emit, AlwaysHackAI(), sandbox, max_rounds=4)
+
+    await pipeline.run()
+
+    started_phases = [
+        data["phase"] for event_type, data in events
+        if event_type == "phase_start"
+    ]
+    assert started_phases == [
+        "r1_attack", "r1_patch",
+        "r2_attack", "r2_patch",
+        "r3_attack", "r3_patch",
+        "r4_attack",
+    ]
+    complete_events = [
+        data for event_type, data in events
+        if event_type == "refine_complete"
+    ]
+    assert complete_events == [{
+        "converged": False,
+        "final_hack_rate": 1.0,
+        "max_rounds": 4,
+    }]
+    state = json.loads((tmp_path / "hacks" / "refine_benchmark" / "state.json").read_text())
+    assert state["max_rounds"] == 4
+    assert state["phases"]["r4_attack"]["status"] == "completed"
+    assert "r4_patch" not in state["phases"]
 
 
 @pytest.mark.asyncio

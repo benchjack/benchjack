@@ -19,6 +19,9 @@ export const VULN_META = {
   V8: { name: "Excessive Permissions", desc: "Root, --privileged, unrestricted network, excessive mounts" },
 };
 
+export const DEFAULT_REFINE_ROUNDS = 3;
+export const MAX_REFINE_ROUNDS = 10;
+
 // ---- Application state ----
 export const state = {
   running: false,
@@ -66,6 +69,7 @@ export const state = {
 
   backend: "claude",     // "codex" | "claude"
   useSandbox: false,
+  refineMaxRounds: DEFAULT_REFINE_ROUNDS,
 };
 
 // ---- DOM element cache ----
@@ -75,6 +79,10 @@ export const els = {
   startBtn:        $("#start-btn"),
   hackBtn:          $("#hack-btn"),
   refineBtn:        $("#refine-btn"),
+  refineControl:    $("#refine-control"),
+  refineMenuBtn:    $("#refine-menu-btn"),
+  refineMenu:       $("#refine-menu"),
+  refineRoundsInput: $("#refine-rounds-input"),
   cancelBtn:        $("#cancel-btn"),
   progressBar:      $("#progress-bar"),
   hackProgressBar:  $("#hack-progress-bar"),

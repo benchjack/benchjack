@@ -46,7 +46,17 @@
       <button type="button" id="sandbox-btn" class="cycle-btn" data-state="nosandbox">no sandbox</button>
       <button id="start-btn" type="submit">Start Audit</button>
       <button id="hack-btn" type="button" class="btn-hack">Just Hack It!</button>
-      <button id="refine-btn" type="button" class="btn-refine">~ Refine</button>
+      <div id="refine-control" class="refine-control">
+        <button id="refine-btn" type="button" class="btn-refine">~ Refine</button>
+        <button id="refine-menu-btn" type="button" class="btn-refine-menu" aria-label="Refine options">...</button>
+        <div id="refine-menu" class="refine-menu" hidden>
+          <button type="button" class="refine-round-option active" data-rounds="3">Default: 3 rounds</button>
+          <label class="refine-round-custom">
+            <span>Custom rounds</span>
+            <input id="refine-rounds-input" type="number" min="1" max="10" value="3">
+          </label>
+        </div>
+      </div>
       <button id="continue-btn" type="button" class="btn-continue" style="display:none">Continue</button>
       <button id="cancel-btn" type="button" class="btn-cancel" style="display:none">Cancel</button>
     </form>

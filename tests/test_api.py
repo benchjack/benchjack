@@ -119,6 +119,36 @@ class TestHackEndpoint:
         assert resp.json()["error"] == "target is required"
 
 
+class TestRefineEndpoint:
+    @patch("server.routes.audit.AIRunner")
+    @patch("server.routes.audit.Sandbox")
+    def test_refine_passes_custom_round_count(self, mock_sandbox, mock_ai, client):
+        mock_ai_instance = MagicMock()
+        mock_ai_instance.backend = "claude"
+        mock_ai.return_value = mock_ai_instance
+        mock_sandbox.return_value = MagicMock()
+
+        with patch("server.routes.audit.RefinePipeline") as mock_pipeline:
+            mock_pipeline.return_value = AsyncMock()
+            resp = client.post("/api/refine", json={
+                "target": "org/bench",
+                "max_rounds": 5,
+            })
+            data = resp.json()
+            assert data["status"] == "started"
+            assert data["max_rounds"] == 5
+            _, kwargs = mock_pipeline.call_args
+            assert kwargs["max_rounds"] == 5
+            assert run_state.active_runs[data["run_id"]]["max_rounds"] == 5
+
+    def test_refine_rejects_invalid_round_count(self, client):
+        resp = client.post("/api/refine", json={
+            "target": "org/bench",
+            "max_rounds": 11,
+        })
+        assert resp.json()["error"] == "max_rounds must be between 1 and 10"
+
+
 class TestCancelEndpoint:
     def test_cancel_unknown_run(self, client):
         resp = client.post("/api/cancel", json={"run_id": "nonexistent"})

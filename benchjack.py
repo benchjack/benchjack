@@ -52,7 +52,7 @@ def _configure_stdio():
 
 # ---- CLI (--no-ui) mode ----
 
-async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"):
+async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial", refine_rounds=3):
     """Run the requested pipeline in CLI mode — no web server."""
     from server.ai_runner import AIRunner
     from server.pipeline import AuditPipeline, HackPipeline, RefinePipeline
@@ -135,7 +135,8 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
             else:
                 rate = data.get("final_hack_rate")
                 pct = round(rate * 100, 1) if rate is not None else "?"
-                print(f"\n  >> Refinement complete — benchmark still hackable ({pct}% after 3 rounds)")
+                rounds = data.get("max_rounds", refine_rounds)
+                print(f"\n  >> Refinement complete - benchmark still hackable ({pct}% after {rounds} rounds)")
 
         elif event_type == "audit_complete":
             _clear_status()
@@ -168,6 +169,7 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
             emit=emit,
             ai=ai,
             sandbox=sandbox,
+            max_rounds=refine_rounds,
         )
     else:
         pipeline = AuditPipeline(
@@ -321,7 +323,13 @@ def main():
     mode_group.add_argument(
         "--refine-it",
         action="store_true",
-        help="Run the iterative refinement pipeline in CLI mode (up to 3 attack/patch rounds)",
+        help="Run the iterative refinement pipeline in CLI mode (default: 3 attack/patch rounds)",
+    )
+    parser.add_argument(
+        "--refine-rounds",
+        type=int,
+        default=3,
+        help="Number of iterative refinement rounds for --refine-it (default: 3, max: 10)",
     )
     args = parser.parse_args()
 
@@ -334,6 +342,7 @@ def main():
             "--audit": args.audit,
             "--hack-it": args.hack_it,
             "--refine-it": args.refine_it,
+            "--refine-rounds": args.refine_rounds != parser.get_default("refine_rounds"),
             "--sandbox": args.sandbox,
             "--no-sandbox": args.no_sandbox,
         }
@@ -375,6 +384,7 @@ def main():
             mode=mode,
             use_sandbox=use_sandbox,
             poc_level=args.poc_level,
+            refine_rounds=args.refine_rounds,
         ))
         return
 

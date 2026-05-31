@@ -245,6 +245,84 @@ body {
 .btn-refine:hover { background: var(--purple); color: var(--bg); }
 .btn-refine:active { transform: none; }
 
+.refine-control {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.refine-control .btn-refine {
+  border-right: 0;
+}
+
+.btn-refine-menu {
+  width: 34px;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--purple);
+  background: transparent;
+  border: 1px solid var(--purple);
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.btn-refine-menu:hover,
+.btn-refine-menu.active {
+  background: var(--purple);
+  color: var(--bg);
+}
+
+.refine-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 190px;
+  padding: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--purple);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.refine-round-option {
+  width: 100%;
+  padding: 7px 8px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.refine-round-option.active,
+.refine-round-option:hover {
+  color: var(--purple);
+  border-color: var(--purple);
+}
+
+.refine-round-custom {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.refine-round-custom input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+
 .btn-continue {
   padding: 7px 16px;
   font-size: 12px;

@@ -50,7 +50,12 @@ export async function startRefine(target) {
   const resp = await fetch("/api/refine", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target, backend: state.backend, use_sandbox: state.useSandbox }),
+    body: JSON.stringify({
+      target,
+      backend: state.backend,
+      use_sandbox: state.useSandbox,
+      max_rounds: state.refineMaxRounds,
+    }),
   });
   const result = await resp.json();
   if (result.error) {

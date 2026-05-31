@@ -2,7 +2,7 @@
 // UI helpers — phase state, tabs, view switching, conversation boxes
 // ================================================================
 
-import { $, $$ } from "./state.js";
+import { $, $$, DEFAULT_REFINE_ROUNDS, MAX_REFINE_ROUNDS } from "./state.js";
 import { state, els, phaseOutputEls, phaseMarkdownEls } from "./state.js";
 import { renderScoreboard, resetVulnHeaders } from "./scoreboard.js";
 import { updateFindingsCounts } from "./findings.js";
@@ -23,7 +23,7 @@ export function updateActionButtons() {
     // Show continue, hide start/hack/refine
     els.startBtn.style.display = "none";
     els.hackBtn.style.display = "none";
-    els.refineBtn.style.display = "none";
+    els.refineControl.style.display = "none";
     els.continueBtn.style.display = "";
     const done = state.loadedRunFinished;
     els.continueBtn.disabled = done;
@@ -33,7 +33,7 @@ export function updateActionButtons() {
     // No loaded run, or a restart stage is selected → show start/hack/refine
     els.startBtn.style.display = "";
     els.hackBtn.style.display = "";
-    els.refineBtn.style.display = "";
+    els.refineControl.style.display = "";
     els.continueBtn.style.display = "none";
   }
 }
@@ -43,12 +43,14 @@ export function setRunning(running) {
   els.cancelBtn.style.display = running ? "" : "none";
   $('label[for="target-input"]').style.display = running ? "none" : "";
   $$(".cycle-btn").forEach(g => { g.style.display = running ? "none" : ""; });
+  els.refineMenu.hidden = true;
+  els.refineMenuBtn.classList.remove("active");
 
   if (running) {
     // Hide all action buttons while pipeline is running
     els.startBtn.style.display = "none";
     els.hackBtn.style.display = "none";
-    els.refineBtn.style.display = "none";
+    els.refineControl.style.display = "none";
     els.continueBtn.style.display = "none";
     state._savedTarget = els.targetInput.value;
     const verb = state.mode === "refine" ? "Refining"
@@ -79,6 +81,105 @@ export function setTimelineMode(mode) {
       el.style.display = mode === m ? "" : "none";
     });
   });
+}
+
+export function clampRefineRounds(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_REFINE_ROUNDS;
+  return Math.min(Math.max(parsed, 1), MAX_REFINE_ROUNDS);
+}
+
+export function setRefineRounds(value) {
+  state.refineMaxRounds = clampRefineRounds(value);
+  els.refineRoundsInput.value = String(state.refineMaxRounds);
+  els.refineRoundsInput.max = String(MAX_REFINE_ROUNDS);
+  els.refineBtn.textContent = state.refineMaxRounds === DEFAULT_REFINE_ROUNDS
+    ? "~ Refine"
+    : `~ Refine ${state.refineMaxRounds}r`;
+  els.refineMenuBtn.title = `Refine rounds: ${state.refineMaxRounds}`;
+  $$(".refine-round-option").forEach((btn) => {
+    btn.classList.toggle("active", Number.parseInt(btn.dataset.rounds, 10) === state.refineMaxRounds);
+  });
+  ensureRefineUI(state.refineMaxRounds);
+}
+
+export function ensureRefineUI(rounds = state.refineMaxRounds) {
+  const count = clampRefineRounds(rounds);
+
+  document.querySelectorAll(".phase[data-mode='refine'], .phase-connector[data-mode='refine']").forEach((el) => el.remove());
+  document.querySelectorAll(".refine-tab").forEach((el) => el.remove());
+  document.querySelectorAll(".tab-pane").forEach((pane) => {
+    if (/^tab-r\d+_(attack|patch)$/.test(pane.id)) pane.remove();
+  });
+  for (const key of Object.keys(phaseOutputEls)) {
+    if (/^r\d+_(attack|patch)$/.test(key)) delete phaseOutputEls[key];
+  }
+  for (const key of Object.keys(phaseMarkdownEls)) {
+    if (/^r\d+_(attack|patch)$/.test(key)) delete phaseMarkdownEls[key];
+  }
+
+  const phases = [];
+  for (let n = 1; n <= count; n += 1) {
+    phases.push({ id: `r${n}_attack`, label: `R${n} Attack` });
+    if (n < count) phases.push({ id: `r${n}_patch`, label: `R${n} Patch` });
+  }
+
+  const timeline = $("#timeline");
+  const phaseTabs = els.phaseTabs;
+  const logPanel = $("#log-panel");
+  phases.forEach((phase, index) => {
+    if (index > 0) {
+      const connector = document.createElement("div");
+      connector.className = "phase-connector";
+      connector.dataset.mode = "refine";
+      connector.style.display = state.mode === "refine" ? "" : "none";
+      timeline.appendChild(connector);
+    }
+
+    const phaseEl = document.createElement("div");
+    phaseEl.className = "phase pending";
+    phaseEl.dataset.phase = phase.id;
+    phaseEl.dataset.mode = "refine";
+    phaseEl.style.display = state.mode === "refine" ? "" : "none";
+    phaseEl.innerHTML = `<div class="phase-dot"></div><span class="phase-label">${phase.label}</span><span class="phase-time"></span>`;
+    timeline.appendChild(phaseEl);
+
+    const tab = document.createElement("button");
+    tab.className = "phase-tab refine-tab";
+    tab.dataset.tab = phase.id;
+    tab.style.display = state.mode === "refine" ? "" : "none";
+    tab.textContent = phase.label;
+    phaseTabs.appendChild(tab);
+
+    const pane = document.createElement("div");
+    pane.id = `tab-${phase.id}`;
+    pane.className = "tab-pane";
+    pane.innerHTML = `
+      <div class="phase-output" data-phase="${phase.id}"></div>
+      <div class="phase-summary" data-phase="${phase.id}">
+        <div class="phase-markdown" data-phase="${phase.id}"></div>
+      </div>
+    `;
+    logPanel.appendChild(pane);
+    phaseOutputEls[phase.id] = pane.querySelector(".phase-output");
+    phaseMarkdownEls[phase.id] = pane.querySelector(".phase-markdown");
+    state.phaseMessages[phase.id] = state.phaseMessages[phase.id] || [];
+    state.phaseSummary[phase.id] = state.phaseSummary[phase.id] || "";
+  });
+
+  els.refineProgressBar.innerHTML = "";
+  for (let n = 1; n <= count; n += 1) {
+    const seg = document.createElement("div");
+    seg.className = "progress-segment pending";
+    seg.dataset.phase = `r${n}`;
+    seg.innerHTML = `<div class="segment-fill"></div><span class="segment-label">Round ${n}</span>`;
+    els.refineProgressBar.appendChild(seg);
+  }
+  const resultSeg = document.createElement("div");
+  resultSeg.className = "progress-segment pending";
+  resultSeg.dataset.phase = "converged";
+  resultSeg.innerHTML = `<div class="segment-fill"></div><span class="segment-label">Result</span>`;
+  els.refineProgressBar.appendChild(resultSeg);
 }
 
 export function setPhaseState(phaseId, status) {
@@ -210,6 +311,7 @@ export function renderPhaseSummary(phase) {
 
 export function resetUIState(mode) {
   state.mode = mode;
+  if (mode === "refine") ensureRefineUI(state.refineMaxRounds);
   state.findings = [];
   state.currentPhase = null;
   state.auditDone = false;

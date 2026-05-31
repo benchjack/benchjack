@@ -1,7 +1,8 @@
 """
 RefinePipeline — iterative attacker/defender loop (Section 4.3).
 
-Phases: r1_attack → r1_patch → r2_attack → r2_patch → r3_attack
+Phases: rN_attack, with rN_patch after every non-final attack round.
+The default cap is 3 rounds, but callers may configure a larger bounded cap.
 Early exit: if hack_rate == 0 after any attack round, remaining rounds are
 skipped and convergence is declared.
 """
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from ..ai_runner import AIRunner
 from ..sandbox import Sandbox
-from .models import EXPLOIT_RESULT_JSONL, REFINE_PHASES, EmitFn
+from .models import EXPLOIT_RESULT_JSONL, EmitFn, clamp_refine_rounds, refine_phases
 from .prompts import HACK_STAGE1_PROMPT, HACK_STAGE2_PROMPT, PATCH_PROMPT
 from .utils import (
     _derive_benchmark_name,
@@ -29,7 +30,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class RefinePipeline:
-    """GAN-inspired iterative attacker/defender loop (up to 3 rounds)."""
+    """GAN-inspired iterative attacker/defender loop."""
 
     def __init__(
         self,
@@ -44,7 +45,7 @@ class RefinePipeline:
         self.emit = emit
         self.ai = ai
         self.sandbox = sandbox
-        self.max_rounds = min(max(max_rounds, 1), 3)
+        self.max_rounds = clamp_refine_rounds(max_rounds)
 
         self.benchmark_path: str | None = None
         self._cancelled = False
@@ -63,7 +64,8 @@ class RefinePipeline:
         await self.emit("audit_start", {
             "target": self.target,
             "mode": "refine",
-            "phases": [{"id": pid, "label": plabel} for pid, plabel in REFINE_PHASES],
+            "max_rounds": self.max_rounds,
+            "phases": [{"id": pid, "label": plabel} for pid, plabel in refine_phases(self.max_rounds)],
         })
 
         await self._prepare_workspace()
@@ -103,7 +105,7 @@ class RefinePipeline:
     def _ensure_dirs(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.jacks_dir / "summary").mkdir(parents=True, exist_ok=True)
-        for n in range(1, 4):
+        for n in range(1, self.max_rounds + 1):
             (self.jacks_dir / f"r{n}").mkdir(parents=True, exist_ok=True)
         self.sandbox.set_dirs(str(self.output_dir), str(self.jacks_dir))
 
@@ -239,7 +241,7 @@ class RefinePipeline:
                         })
                 break
 
-            # --- Patch phase (rounds 1 and 2 only; no patch after round 3) ---
+            # --- Patch phase (no patch after the final attack round) ---
             if round_n < self.max_rounds:
                 patch_id = f"r{round_n}_patch"
                 patch_label = f"Round {round_n} — Patch"
@@ -261,6 +263,7 @@ class RefinePipeline:
         await self.emit("refine_complete", {
             "converged": converged,
             "final_hack_rate": round(last_hack_rate, 3) if last_hack_rate is not None else None,
+            "max_rounds": self.max_rounds,
         })
 
     # ------------------------------------------------------------------
@@ -323,6 +326,7 @@ class RefinePipeline:
         state["backend"] = self.ai.backend
         state["benchmark_name"] = self._benchmark_name
         state["benchmark_path"] = self.benchmark_path or ""
+        state["max_rounds"] = self.max_rounds
         state.setdefault("phases", {})[phase_id] = {
             "status": status,
             "duration": round(duration, 1),

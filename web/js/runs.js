@@ -3,7 +3,7 @@
 // ================================================================
 
 import { state, els } from "./state.js";
-import { resetUIState, setPhaseState } from "./ui.js";
+import { resetUIState, setPhaseState, setRefineRounds } from "./ui.js";
 import { connectSSE } from "./sse.js";
 import { startAudit } from "./api.js";
 import { escapeHTML, formatDuration, formatTimeAgo } from "./utils.js";
@@ -54,10 +54,16 @@ function renderRunsList(runs) {
     card.className = "run-card";
     card.dataset.status = run.status;
 
+    const refineRounds = run.max_rounds || 3;
+    const refinePhaseDots = [];
+    for (let n = 1; n <= refineRounds; n += 1) {
+      refinePhaseDots.push(`r${n}_attack`);
+      if (n < refineRounds) refinePhaseDots.push(`r${n}_patch`);
+    }
     const dotPhases = run.mode === "hack"
       ? ["hack", "verify"]
       : run.mode === "refine"
-      ? ["r1_attack", "r1_patch", "r2_attack", "r2_patch", "r3_attack"]
+      ? refinePhaseDots
       : ["setup", "recon", "vuln_scan", "poc", "report"];
     const phaseDots = dotPhases
       .map((pid) => {
@@ -84,9 +90,9 @@ function renderRunsList(runs) {
     const runBackend = run.backend || "";
     let actions = "";
     if (isRunning) {
-      actions += `<button class="run-action run-action-view" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}">View</button>`;
+      actions += `<button class="run-action run-action-view" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}" data-max-rounds="${refineRounds}">View</button>`;
     } else {
-      actions += `<button class="run-action run-action-load" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}">Load</button>`;
+      actions += `<button class="run-action run-action-load" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}" data-max-rounds="${refineRounds}">Load</button>`;
     }
     if (canContinue) {
       actions += `<button class="run-action run-action-continue" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}">Continue</button>`;
@@ -118,14 +124,20 @@ function renderRunsList(runs) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const phases = _runsPhaseCache.get(btn.dataset.name) || {};
-      loadRun(btn.dataset.name, btn.dataset.target, btn.dataset.mode || "audit", phases, btn.dataset.backend || null);
+      loadRun(
+        btn.dataset.name, btn.dataset.target, btn.dataset.mode || "audit",
+        phases, btn.dataset.backend || null, btn.dataset.maxRounds || 3,
+      );
     });
   });
 
   runsList.querySelectorAll(".run-action-view").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      viewActiveRun(btn.dataset.name, btn.dataset.target, btn.dataset.mode || "audit", btn.dataset.backend || null);
+      viewActiveRun(
+        btn.dataset.name, btn.dataset.target, btn.dataset.mode || "audit",
+        btn.dataset.backend || null, btn.dataset.maxRounds || 3,
+      );
     });
   });
 
@@ -137,8 +149,9 @@ function renderRunsList(runs) {
   });
 }
 
-async function loadRun(name, target, mode = "audit", phases = {}, backend = null) {
+async function loadRun(name, target, mode = "audit", phases = {}, backend = null, maxRounds = 3) {
   closeRunsPanel();
+  if (mode === "refine") setRefineRounds(maxRounds);
   resetUIState(mode);
   document.querySelector("#scoreboard-empty-text").textContent = "Loading run\u2026";
   els.targetInput.value = target;
@@ -171,8 +184,9 @@ async function loadRun(name, target, mode = "audit", phases = {}, backend = null
   }
 }
 
-function viewActiveRun(name, target, mode = "audit", backend = null) {
+function viewActiveRun(name, target, mode = "audit", backend = null, maxRounds = 3) {
   closeRunsPanel();
+  if (mode === "refine") setRefineRounds(maxRounds);
   resetUIState(mode);
   els.targetInput.value = target;
   if (backend) {

@@ -9,7 +9,9 @@ from .hack import HackPipeline
 from .refine import RefinePipeline
 from .models import (
     EXPLOIT_RESULT_JSONL,
+    DEFAULT_REFINE_ROUNDS,
     HACK_PHASES,
+    MAX_REFINE_ROUNDS,
     PHASES,
     REFINE_PHASES,
     TASK_IDS_JSON,
@@ -17,6 +19,8 @@ from .models import (
     EmitFn,
     Finding,
     PhaseResult,
+    clamp_refine_rounds,
+    refine_phases,
 )
 from .utils import _derive_benchmark_name
 
@@ -27,6 +31,10 @@ __all__ = [
     "PHASES",
     "HACK_PHASES",
     "REFINE_PHASES",
+    "DEFAULT_REFINE_ROUNDS",
+    "MAX_REFINE_ROUNDS",
+    "clamp_refine_rounds",
+    "refine_phases",
     "Finding",
     "PhaseResult",
     "EmitFn",

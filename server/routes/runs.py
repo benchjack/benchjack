@@ -54,7 +54,7 @@ async def list_runs():
             if not entry.is_dir() or not state_path.exists():
                 continue
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
 
@@ -91,7 +91,7 @@ async def list_runs():
             findings_path = entry / "findings.json"
             if findings_path.exists():
                 try:
-                    findings_count = len(json.loads(findings_path.read_text()))
+                    findings_count = len(json.loads(findings_path.read_text(encoding="utf-8")))
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -144,7 +144,7 @@ async def load_run(name: str):
         return {"error": f"Run '{name}' not found"}
 
     try:
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"error": f"Could not read state for '{name}'"}
 
@@ -170,7 +170,7 @@ async def load_run(name: str):
     findings_path = _HACKS_ROOT / name / "findings.json"
     if findings_path.exists():
         try:
-            findings = json.loads(findings_path.read_text())
+            findings = json.loads(findings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -179,7 +179,7 @@ async def load_run(name: str):
     tr_path = _HACKS_ROOT / name / "task_results.json"
     if tr_path.exists():
         try:
-            task_results = json.loads(tr_path.read_text())
+            task_results = json.loads(tr_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -189,7 +189,7 @@ async def load_run(name: str):
     tid_path = _HACKS_ROOT / name / "task_ids.json"
     if tid_path.exists():
         try:
-            loaded = json.loads(tid_path.read_text())
+            loaded = json.loads(tid_path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 task_paths = {str(k): str(v) for k, v in loaded.items()}
                 task_ids = list(task_paths.keys())
@@ -213,13 +213,13 @@ async def load_run(name: str):
         summary_path = _HACKS_ROOT / name / "summary" / f"{phase_id}.md"
         summary_text = ""
         try:
-            summary_text = summary_path.read_text() if summary_path.exists() else ""
+            summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
         except OSError:
             pass
 
         if log_path.exists():
             try:
-                log_content = log_path.read_text()
+                log_content = log_path.read_text(encoding="utf-8")
                 for log_data in _parse_log_events(log_content, phase_id):
                     await bus.publish("log", log_data)
             except OSError:

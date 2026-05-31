@@ -194,7 +194,7 @@ async def rerun_from_phase(request: Request):
         if not state_path.exists():
             return {"error": f"Run '{run_id}' not found"}
         try:
-            saved = json.loads(state_path.read_text())
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
             target = saved.get("target", "")
             if not backend:
                 backend = saved.get("backend", "")

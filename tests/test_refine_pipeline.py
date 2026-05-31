@@ -257,3 +257,22 @@ def test_refine_remove_readonly_removes_inaccessible_directory(tmp_path):
     RefinePipeline._handle_remove_readonly(inaccessible, str(path), None)
 
     assert not path.exists()
+
+
+def test_refine_persists_unicode_logs_and_summaries(tmp_path, monkeypatch):
+    """Claude output can contain symbols that fail with Windows cp1252 defaults."""
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    async def emit(_event_type, _data):
+        pass
+
+    sandbox = Sandbox(str(tmp_path / "tools"), enabled=False)
+    pipeline = RefinePipeline("sample-bench", emit, FakeAI(), sandbox)
+    pipeline._ensure_dirs()
+
+    text = "verified \u2705 solved"
+    pipeline._save_log("r1_attack", text)
+    pipeline._save_summary("r1_attack", text)
+
+    assert (pipeline.output_dir / "r1_attack.log").read_text(encoding="utf-8") == text
+    assert (pipeline.jacks_dir / "summary" / "r1_attack.md").read_text(encoding="utf-8") == text

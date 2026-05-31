@@ -208,16 +208,12 @@ class RefinePipeline:
 
         results = _read_exploit_results(self.benchmark_path)
         if not results:
-            return 0.0, 0, 0
+            return 0.0, 0, self._known_task_total()
 
         # Detect "all_tasks" sentinel
         has_all_tasks = any(r["task"] == "all_tasks" for r in results)
         if has_all_tasks:
-            plain_name = self._benchmark_name.removeprefix("refine_")
-            task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
-            task_ids = _read_task_ids_json(task_ids_dir)
-            # Expand to real task count if available, else treat as 1 virtual task
-            total = len(task_ids) if task_ids and "all_tasks" not in task_ids else 1
+            total = self._known_task_total()
             all_hacked = any(
                 r["task"] == "all_tasks" and r.get("hacked") for r in results
             )
@@ -230,6 +226,15 @@ class RefinePipeline:
             return 0.0, 0, 0
         hacked = sum(1 for r in results if r.get("hacked"))
         return hacked / total, hacked, total
+
+    def _known_task_total(self) -> int:
+        """Return prior audit task count, or one virtual task when unknown."""
+        plain_name = self._benchmark_name.removeprefix("refine_")
+        task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
+        task_ids = _read_task_ids_json(task_ids_dir)
+        if task_ids and "all_tasks" not in task_ids:
+            return len(task_ids)
+        return 1
 
     # ------------------------------------------------------------------
     # Persistence helpers

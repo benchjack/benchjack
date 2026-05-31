@@ -5,9 +5,9 @@ Phases: r1_attack → r1_patch → r2_attack → r2_patch → r3_attack
 Early exit: if hack_rate == 0 after any attack round, remaining rounds are
 skipped and convergence is declared.
 """
+import asyncio
 import json
 import os
-import re
 import shutil
 import time
 from pathlib import Path
@@ -57,7 +57,6 @@ class RefinePipeline:
         self._ensure_dirs()
 
         self.benchmark_path = str(self.output_dir / "repo")
-        os.makedirs(self.benchmark_path, exist_ok=True)
         self.sandbox.set_benchmark_path(self.benchmark_path)
 
         await self.emit("audit_start", {
@@ -66,6 +65,7 @@ class RefinePipeline:
             "phases": [{"id": pid, "label": plabel} for pid, plabel in REFINE_PHASES],
         })
 
+        await self._prepare_workspace()
         await self.sandbox.start_main_container(emit=self.emit)
         try:
             await self._run_loop()
@@ -106,6 +106,57 @@ class RefinePipeline:
             (self.jacks_dir / f"r{n}").mkdir(parents=True, exist_ok=True)
         self.sandbox.set_dirs(str(self.output_dir), str(self.jacks_dir))
 
+    async def _prepare_workspace(self):
+        """Create a clean benchmark workspace for this refine run."""
+        if not self.benchmark_path:
+            return
+
+        dest = Path(self.benchmark_path)
+        self._reset_workspace(dest)
+
+        target = self.target.strip()
+        if os.path.isdir(target):
+            self._copy_local_target(Path(target), dest)
+        elif target.startswith(("http://", "https://")):
+            await self._git_clone(target, dest)
+        elif "/" in target:
+            await self._git_clone(f"https://github.com/{target}", dest)
+        else:
+            # Keep an empty workspace for named benchmarks. The attack prompt
+            # still asks the AI backend to locate and clone the benchmark.
+            dest.mkdir(parents=True, exist_ok=True)
+
+        self.sandbox.set_benchmark_path(str(dest))
+
+    def _reset_workspace(self, dest: Path):
+        output_dir = self.output_dir.resolve()
+        parent = dest.parent.resolve()
+        if parent != output_dir:
+            raise RuntimeError(f"Refusing to reset unexpected workspace: {dest}")
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+
+    def _copy_local_target(self, src: Path, dest: Path):
+        src_resolved = src.resolve()
+        dest_resolved = dest.resolve()
+        if src_resolved == dest_resolved or dest_resolved.is_relative_to(src_resolved):
+            raise RuntimeError(
+                f"Refusing to copy benchmark into itself: {src_resolved} -> {dest_resolved}"
+            )
+        shutil.copytree(src_resolved, dest_resolved, dirs_exist_ok=True)
+
+    async def _git_clone(self, url: str, dest: Path):
+        proc = await asyncio.create_subprocess_exec(
+            "git", "clone", "--depth=1", url, str(dest),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            details = stderr.decode(errors="replace") or stdout.decode(errors="replace")
+            raise RuntimeError(f"git clone failed for {url}:\n{details}")
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -121,14 +172,11 @@ class RefinePipeline:
             # --- Attack phase ---
             attack_id = f"r{round_n}_attack"
             attack_label = f"Round {round_n} — Attack"
-            try:
-                await self._run_phase(
-                    attack_id, attack_label,
-                    lambda rn=round_n: self._phase_attack(rn),
-                    round_n=round_n,
-                )
-            except Exception:
-                break
+            await self._run_phase(
+                attack_id, attack_label,
+                lambda rn=round_n: self._phase_attack(rn),
+                round_n=round_n,
+            )
 
             if self._cancelled:
                 break
@@ -170,14 +218,11 @@ class RefinePipeline:
             if round_n < self.max_rounds:
                 patch_id = f"r{round_n}_patch"
                 patch_label = f"Round {round_n} — Patch"
-                try:
-                    await self._run_phase(
-                        patch_id, patch_label,
-                        lambda rn=round_n: self._phase_patch(rn),
-                        round_n=round_n,
-                    )
-                except Exception:
-                    break
+                await self._run_phase(
+                    patch_id, patch_label,
+                    lambda rn=round_n: self._phase_patch(rn),
+                    round_n=round_n,
+                )
 
             # --- Emit round complete ---
             await self.emit("refine_round_complete", {
@@ -349,15 +394,26 @@ class RefinePipeline:
 
         # After an attack phase: push task/exploit data to the scoreboard
         if phase_id.endswith("_attack") and self.benchmark_path:
+            await self._emit_attack_results(phase_id)
+
+    async def _emit_attack_results(self, phase_id: str):
+        """Best-effort UI replay; persistence already succeeded by this point."""
+        try:
             plain_name = self._benchmark_name.removeprefix("refine_")
             task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
             task_results, exploit_list = _expand_and_split_exploit_results(
-                self.benchmark_path, task_ids_dir
+                self.benchmark_path or "", task_ids_dir
             )
             for tr in task_results:
                 await self.emit("task_result", tr)
             if exploit_list:
                 await self.emit("exploit_results", {"results": exploit_list})
+        except Exception as exc:
+            await self.emit("log", {
+                "phase": phase_id,
+                "msg_type": "text",
+                "text": f"[warning] Could not load exploit results for scoreboard: {exc}",
+            })
 
     # ------------------------------------------------------------------
     # Helper: stream one AI call
@@ -366,7 +422,8 @@ class RefinePipeline:
     async def _ai_phase(self, phase_id: str, prompt: str) -> str:
         await self.emit("log", {"phase": phase_id, "msg_type": "prompt", "text": prompt})
         text_parts: list[str] = []
-        async for event in self.ai.stream(prompt):
+        cwd = self.sandbox.workspace if self.sandbox.enabled else self.benchmark_path
+        async for event in self.ai.stream(prompt, cwd=cwd):
             await self.emit("log", {"phase": phase_id, **event})
             if event.get("msg_type") == "text":
                 text_parts.append(event["text"])
@@ -399,6 +456,7 @@ class RefinePipeline:
         exploit_path = str(self.round_dir(round_n) / EXPLOIT_RESULT_JSONL)
         findings_path = str(self.jacks_dir / "summary" / f"r{round_n}_attack.md")
         prompt = PATCH_PROMPT.format(
+            workspace=self.sandbox.workspace,
             exploit_path=exploit_path,
             findings_path=findings_path,
         )

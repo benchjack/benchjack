@@ -380,7 +380,7 @@ Be factual. Cite file paths and line numbers.
 
 PATCH_PROMPT = """\
 You are a benchmark security hardener.
-The benchmark under audit is in the current working directory.
+The benchmark under audit is at `{workspace}`. Work from that directory.
 
 A verified reward-hacking exploit was found in the previous round.
   Exploit results:  {exploit_path}

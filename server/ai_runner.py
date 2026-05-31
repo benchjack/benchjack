@@ -78,7 +78,7 @@ class AIRunner:
         plain strings.
         """
         if self.sandbox and self.sandbox.enabled:
-            async for line in self._stream_sandboxed(prompt):
+            async for line in self._stream_sandboxed(prompt, cwd):
                 yield line
             return
 
@@ -107,7 +107,7 @@ class AIRunner:
     # Sandboxed execution
     # ------------------------------------------------------------------
 
-    async def _stream_sandboxed(self, prompt: str):
+    async def _stream_sandboxed(self, prompt: str, cwd: str | None):
         """Run the AI CLI inside the Docker sandbox.
 
         Uses stream-json for Claude so events arrive incrementally.
@@ -127,14 +127,14 @@ class AIRunner:
         if self.backend == "claude":
             # Parse stream-json events from the sandbox stream
             async for raw_line in self.sandbox.stream_ai(
-                shell_cmd, stdin_data=prompt,
+                shell_cmd, stdin_data=prompt, cwd=cwd,
             ):
                 # Each line is a JSON event from stream-json
                 for parsed in self._parse_stream_json_line(raw_line):
                     yield parsed
         else:
             async for line in self.sandbox.stream_ai(
-                shell_cmd, stdin_data=prompt,
+                shell_cmd, stdin_data=prompt, cwd=cwd,
             ):
                 yield {"msg_type": "text", "text": line}
 
@@ -163,11 +163,22 @@ class AIRunner:
                 cwd=cwd,
                 limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
             )
+            stderr_task = asyncio.create_task(proc.stderr.read())
 
-            async for line in self._read_and_parse_stream_json(proc):
-                yield line
+            try:
+                async for line in self._read_and_parse_stream_json(proc):
+                    yield line
+            except Exception:
+                await _terminate_process(proc)
+                await stderr_task
+                raise
 
             await proc.wait()
+            stderr = (await stderr_task).decode(errors="replace").strip()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"claude exited with code {proc.returncode}: {stderr or 'no stderr'}"
+                )
         finally:
             try:
                 os.unlink(prompt_path)
@@ -192,9 +203,20 @@ class AIRunner:
                 cwd=cwd,
                 limit=1024 * 1024,
             )
-            async for line in self._read_lines(proc):
-                yield {"msg_type": "text", "text": line}
+            stderr_task = asyncio.create_task(proc.stderr.read())
+            try:
+                async for line in self._read_lines(proc):
+                    yield {"msg_type": "text", "text": line}
+            except Exception:
+                await _terminate_process(proc)
+                await stderr_task
+                raise
             await proc.wait()
+            stderr = (await stderr_task).decode(errors="replace").strip()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"codex exited with code {proc.returncode}: {stderr or 'no stderr'}"
+                )
         finally:
             try:
                 os.unlink(prompt_path)
@@ -238,7 +260,7 @@ class AIRunner:
         try:
             evt = json.loads(line)
         except json.JSONDecodeError:
-            if "You've hit your limit" in line:
+            if _is_backend_limit_error(line):
                 raise RateLimitError(line)
             yield {"msg_type": "text", "text": line}
             return
@@ -250,7 +272,7 @@ class AIRunner:
                 btype = block.get("type")
                 if btype == "text":
                     text = block.get("text", "")
-                    if "You've hit your limit" in text:
+                    if _is_backend_limit_error(text):
                         raise RateLimitError(text)
                     yield {"msg_type": "text", "text": text}
                 elif btype == "tool_use":
@@ -279,7 +301,7 @@ class AIRunner:
             # The result event duplicates assistant text already streamed
             # above — only check for rate-limit errors, don't re-yield.
             result_text = evt.get("result", "")
-            if isinstance(result_text, str) and "You've hit your limit" in result_text:
+            if isinstance(result_text, str) and _is_backend_limit_error(result_text):
                 raise RateLimitError(result_text)
 
         # system, rate_limit_event -- silently skipped
@@ -330,3 +352,29 @@ def _summarise_tool_input(name: str, inp: dict) -> str:
     # Generic fallback
     s = json.dumps(inp, ensure_ascii=False)
     return s if len(s) < 120 else s[:117] + "..."
+
+
+def _is_backend_limit_error(text: str) -> bool:
+    t = text.lower()
+    return (
+        "you've hit your limit" in t
+        or "credit balance is too low" in t
+        or "rate limit" in t
+    )
+
+
+async def _terminate_process(proc):
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        await proc.wait()

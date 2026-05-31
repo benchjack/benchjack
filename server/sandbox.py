@@ -358,6 +358,7 @@ class Sandbox:
         shell_cmd: str,
         *,
         stdin_data: str | None = None,
+        cwd: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Run *shell_cmd* in an AI-profile container (network enabled).
 
@@ -369,18 +370,24 @@ class Sandbox:
         Falls back to host subprocess when Docker is unavailable.
         """
         if not self.enabled:
-            async for line in self._host_stream_shell(shell_cmd, stdin_data=stdin_data):
+            async for line in self._host_stream_shell(
+                shell_cmd, cwd=cwd, stdin_data=stdin_data,
+            ):
                 yield line
             return
 
         if self._container_id:
             # Post-setup: exec into the persistent container
-            docker_cmd = ["docker", "exec", "-i", self._container_id, "sh", "-c", shell_cmd]
+            docker_cmd = ["docker", "exec", "-i"]
+            if cwd:
+                docker_cmd += ["-w", cwd]
+            docker_cmd += [self._container_id, "sh", "-c", shell_cmd]
         else:
             # Setup phase: ephemeral container
-            docker_cmd = self._base_docker_args(network=True, ai=True) + [
-                "sh", "-c", shell_cmd,
-            ]
+            base_cmd = self._base_docker_args(network=True, ai=True)
+            if cwd:
+                base_cmd = base_cmd[:-1] + ["-w", cwd] + base_cmd[-1:]
+            docker_cmd = base_cmd + ["sh", "-c", shell_cmd]
 
         proc = await asyncio.create_subprocess_exec(
             *docker_cmd,
@@ -401,6 +408,8 @@ class Sandbox:
             yield raw.decode(errors="replace").rstrip("\n")
 
         await proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Sandbox AI command exited with code {proc.returncode}")
 
     # ------------------------------------------------------------------
     # Cleanup

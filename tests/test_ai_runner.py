@@ -99,6 +99,10 @@ class TestParseStreamJsonLine:
         with pytest.raises(RateLimitError):
             self._parse(json.dumps(evt))
 
+    def test_credit_balance_error_raises(self):
+        with pytest.raises(RateLimitError):
+            self._parse("Credit balance is too low")
+
     def test_multiple_content_blocks(self):
         evt = {
             "type": "assistant",

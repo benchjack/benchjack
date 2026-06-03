@@ -283,10 +283,10 @@ class Sandbox:
         args += [
             "-v", f"{self._claude_dir}:/home/user",
             "-e", "HOME=/home/user",
+            *_docker_user_args(),
             IMAGE_TAG,
             "sleep", "infinity",
         ]
-        args[-2:-2] = _docker_user_args()
 
         try:
             proc = await asyncio.create_subprocess_exec(

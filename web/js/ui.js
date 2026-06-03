@@ -186,13 +186,45 @@ export function setPhaseState(phaseId, status) {
   const el = $(`.phase[data-phase="${phaseId}"]`);
   if (el) el.className = `phase ${status}`;
 
-  // Refine progress bar is managed by refine_round_complete / refine_complete
-  // events in handlers.js — do not touch it from here.
-  if (state.mode === "refine") return;
+  if (state.mode === "refine") {
+    setRefineRoundSegmentState(phaseId);
+    return;
+  }
 
   const activeBar = state.mode === "hack" ? els.hackProgressBar : els.progressBar;
   const seg = activeBar.querySelector(`.progress-segment[data-phase="${phaseId}"]`);
   if (seg) seg.className = `progress-segment ${status}`;
+}
+
+function setRefineRoundSegmentState(phaseId) {
+  const match = phaseId.match(/^r(\d+)_(attack|patch)$/);
+  if (!match) return;
+
+  const seg = els.refineProgressBar.querySelector(`.progress-segment[data-phase="r${match[1]}"]`);
+  if (!seg) return;
+
+  const statuses = $$(`.phase[data-phase^="r${match[1]}_"]`).map((phaseEl) => {
+    if (phaseEl.classList.contains("failed")) return "failed";
+    if (phaseEl.classList.contains("running")) return "running";
+    if (phaseEl.classList.contains("completed")) return "completed";
+    if (phaseEl.classList.contains("skipped")) return "skipped";
+    return "pending";
+  });
+
+  let segmentStatus = "pending";
+  if (statuses.includes("failed")) {
+    segmentStatus = "failed";
+  } else if (statuses.includes("running")) {
+    segmentStatus = "running";
+  } else if (statuses.includes("completed")) {
+    segmentStatus = statuses.includes("pending") && !statuses.includes("skipped")
+      ? "running"
+      : "completed";
+  } else if (statuses.includes("skipped")) {
+    segmentStatus = "skipped";
+  }
+
+  seg.className = `progress-segment ${segmentStatus}`;
 }
 
 // ---- Tab and view management ----

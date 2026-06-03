@@ -121,6 +121,48 @@ async def test_refine_converges_when_attack_writes_no_exploit_rows(tmp_path, mon
         if event_type == "phase_start"
     ]
     assert "r1_patch" not in started_phases
+    state = json.loads((tmp_path / "hacks" / "refine_sample-bench" / "state.json").read_text())
+    assert state["phases"]["r1_attack"]["status"] == "completed"
+    assert state["phases"]["r1_patch"]["status"] == "skipped"
+    assert state["phases"]["r2_attack"]["status"] == "skipped"
+    assert state["phases"]["r2_patch"]["status"] == "skipped"
+    assert state["phases"]["r3_attack"]["status"] == "skipped"
+
+
+def test_refine_hack_rate_uses_known_task_count_denominator(tmp_path, monkeypatch):
+    """Successful exploit rows should be divided by all known benchmark tasks."""
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    prior_audit_dir = tmp_path / "hacks" / "sample-bench"
+    prior_audit_dir.mkdir(parents=True)
+    (prior_audit_dir / "benchjack_task_ids.json").write_text(json.dumps({
+        "task_1": "tasks/1.json",
+        "task_2": "tasks/2.json",
+        "task_3": "tasks/3.json",
+    }))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "exploit_result.jsonl").write_text(json.dumps({
+        "task": "task_2",
+        "vulnerability": "V6",
+        "severity": "CRITICAL",
+        "hacked": True,
+        "explanation": "debug bypass",
+    }) + "\n")
+
+    async def emit(_event_type, _data):
+        pass
+
+    sandbox = Sandbox(str(tmp_path / "tools"), enabled=False)
+    pipeline = RefinePipeline("sample-bench", emit, FakeAI(), sandbox)
+    pipeline.benchmark_path = str(workspace)
+
+    hack_rate, hacked, total = pipeline._compute_hack_rate()
+
+    assert hacked == 1
+    assert total == 3
+    assert hack_rate == pytest.approx(1 / 3)
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import os
 
 import pytest
 
+from server import sandbox as sandbox_module
 from server.sandbox import Sandbox
 
 
@@ -68,3 +69,49 @@ class TestSandboxCleanup:
         sb = Sandbox(str(tools), enabled=False)
         sb.cleanup()
         sb.cleanup()  # should not raise
+
+
+@pytest.mark.asyncio
+async def test_main_container_places_user_args_before_image(tmp_path, monkeypatch):
+    """Docker options must appear before IMAGE_TAG, not in the container command."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    sb = Sandbox(str(tools), enabled=False)
+    sb.enabled = True
+    sb.set_benchmark_path(str(tmp_path / "benchmark"))
+    sb.set_dirs(str(tmp_path / "output"), str(tmp_path / "hacks"))
+
+    async def fake_ensure_image(_self, emit=None):
+        return None
+
+    monkeypatch.setattr(Sandbox, "ensure_image", fake_ensure_image)
+    monkeypatch.setattr(sb, "_prepare_claude_dir", lambda: setattr(sb, "_claude_dir", str(home)))
+    monkeypatch.setattr(sandbox_module, "_docker_user_args", lambda: ["--user", "1000:1000"])
+
+    captured = {}
+
+    async def fake_create_subprocess_exec(*args, **_kwargs):
+        captured["args"] = list(args)
+
+        class FakeProc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"abc123\n", b""
+
+        return FakeProc()
+
+    monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    await sb.start_main_container()
+    sb._container_id = None
+    sb.cleanup()
+
+    args = captured["args"]
+    image_index = args.index(sandbox_module.IMAGE_TAG)
+    user_index = args.index("--user")
+    assert user_index < image_index
+    assert args[image_index + 1:image_index + 3] == ["sleep", "infinity"]

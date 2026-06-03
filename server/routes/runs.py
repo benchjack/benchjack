@@ -44,6 +44,10 @@ def _phase_list(mode: str, max_rounds: int | str | None = None) -> list[str]:
     return [pid for pid, _ in PHASES]
 
 
+def _is_terminal_status(status: str | None) -> bool:
+    return status in {"completed", "skipped"}
+
+
 @router.get("/runs")
 async def list_runs():
     """List all runs from hacks/ directory, plus in-memory active runs."""
@@ -65,7 +69,7 @@ async def list_runs():
             phases = state.get("phases", {})
             completed_phases = [
                 pid for pid in phase_ids
-                if phases.get(pid, {}).get("status") == "completed"
+                if _is_terminal_status(phases.get(pid, {}).get("status"))
             ]
             is_finished = len(completed_phases) == len(phase_ids)
             any_failed = any(
@@ -289,9 +293,19 @@ async def load_run(name: str):
         })
 
     all_completed = all(
-        phases_meta.get(pid, {}).get("status") == "completed"
+        _is_terminal_status(phases_meta.get(pid, {}).get("status"))
         for pid, _ in phase_list
     )
+
+    if run_mode == "refine" and all_completed:
+        await bus.publish("refine_complete", {
+            "converged": any(
+                phases_meta.get(pid, {}).get("status") == "skipped"
+                for pid, _ in phase_list
+            ),
+            "final_hack_rate": state.get("final_hack_rate"),
+            "max_rounds": max_rounds,
+        })
 
     await bus.publish("audit_complete", {
         "target": target,
@@ -309,6 +323,7 @@ async def load_run(name: str):
         "target": target,
         "mode": run_mode,
         "backend": run_backend,
+        "max_rounds": max_rounds,
     }
 
     return {

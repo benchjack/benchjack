@@ -224,21 +224,12 @@ class RefinePipeline:
                 })
                 # Skip current round's patch (if not the last round)
                 if round_n < self.max_rounds:
-                    await self.emit("phase_skip", {
-                        "phase": f"r{round_n}_patch",
-                        "reason": "converged",
-                    })
+                    await self._skip_phase(f"r{round_n}_patch", "converged")
                 # Skip all remaining rounds
                 for remaining in range(round_n + 1, self.max_rounds + 1):
-                    await self.emit("phase_skip", {
-                        "phase": f"r{remaining}_attack",
-                        "reason": "converged",
-                    })
+                    await self._skip_phase(f"r{remaining}_attack", "converged")
                     if remaining < self.max_rounds:
-                        await self.emit("phase_skip", {
-                            "phase": f"r{remaining}_patch",
-                            "reason": "converged",
-                        })
+                        await self._skip_phase(f"r{remaining}_patch", "converged")
                 break
 
             # --- Patch phase (no patch after the final attack round) ---
@@ -280,13 +271,14 @@ class RefinePipeline:
             return 0.0, 0, 0
 
         results = _read_exploit_results(self.benchmark_path)
+        known_total = self._known_task_total(fallback=None)
         if not results:
-            return 0.0, 0, self._known_task_total()
+            return 0.0, 0, known_total or 1
 
         # Detect "all_tasks" sentinel
         has_all_tasks = any(r["task"] == "all_tasks" for r in results)
         if has_all_tasks:
-            total = self._known_task_total()
+            total = known_total or 1
             all_hacked = any(
                 r["task"] == "all_tasks" and r.get("hacked") for r in results
             )
@@ -294,24 +286,44 @@ class RefinePipeline:
                 return 1.0, total, total
             return 0.0, 0, total
 
-        total = len(results)
+        result_tasks = {
+            r["task"] for r in results
+            if r.get("task") and r.get("task") != "all_tasks"
+        }
+        total = known_total or len(result_tasks)
         if total == 0:
             return 0.0, 0, 0
-        hacked = sum(1 for r in results if r.get("hacked"))
+        hacked_tasks = {
+            r["task"] for r in results
+            if r.get("task") and r.get("hacked")
+        }
+        hacked = min(len(hacked_tasks), total)
         return hacked / total, hacked, total
 
-    def _known_task_total(self) -> int:
-        """Return prior audit task count, or one virtual task when unknown."""
+    def _known_task_total(self, *, fallback: int | None = 1) -> int | None:
+        """Return the known task count, or fallback when unavailable."""
+        if self.benchmark_path:
+            task_ids = _read_task_ids_json(self.benchmark_path)
+            if task_ids and "all_tasks" not in task_ids:
+                return len(task_ids)
+
         plain_name = self._benchmark_name.removeprefix("refine_")
         task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
         task_ids = _read_task_ids_json(task_ids_dir)
         if task_ids and "all_tasks" not in task_ids:
             return len(task_ids)
-        return 1
+        return fallback
 
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
+
+    async def _skip_phase(self, phase_id: str, reason: str):
+        self._save_state(phase_id, "skipped", 0.0)
+        await self.emit("phase_skip", {
+            "phase": phase_id,
+            "reason": reason,
+        })
 
     def _save_state(self, phase_id: str, status: str, duration: float):
         state_path = self.jacks_dir / "state.json"

@@ -5,7 +5,7 @@
 import { state, els } from "./state.js";
 import { resetUIState, setPhaseState, setRefineRounds } from "./ui.js";
 import { connectSSE } from "./sse.js";
-import { startAudit } from "./api.js";
+import { startAudit, startRefine } from "./api.js";
 import { escapeHTML, formatDuration, formatTimeAgo } from "./utils.js";
 
 const runsPanel = document.querySelector("#runs-panel");
@@ -95,7 +95,7 @@ function renderRunsList(runs) {
       actions += `<button class="run-action run-action-load" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}" data-max-rounds="${refineRounds}">Load</button>`;
     }
     if (canContinue) {
-      actions += `<button class="run-action run-action-continue" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}">Continue</button>`;
+      actions += `<button class="run-action run-action-continue" data-name="${escapeHTML(run.name)}" data-target="${escapeHTML(run.target)}" data-mode="${runMode}" data-backend="${escapeHTML(runBackend)}" data-max-rounds="${refineRounds}">${runMode === "refine" ? "Restart refinement" : "Continue"}</button>`;
     }
 
     card.innerHTML = `
@@ -144,7 +144,7 @@ function renderRunsList(runs) {
   runsList.querySelectorAll(".run-action-continue").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      continueRun(btn.dataset.target);
+      continueRun(btn.dataset.target, btn.dataset.mode, btn.dataset.backend, btn.dataset.maxRounds);
     });
   });
 }
@@ -197,8 +197,18 @@ function viewActiveRun(name, target, mode = "audit", backend = null, maxRounds =
   connectSSE(name);
 }
 
-async function continueRun(target) {
+async function continueRun(target, mode = "audit", backend = null, maxRounds = 3) {
   closeRunsPanel();
   els.targetInput.value = target;
-  startAudit(target);
+  if (mode === "refine") {
+    setRefineRounds(maxRounds);
+    if (backend) {
+      state.backend = backend === "claude" ? "claude" : "codex";
+      els.backendBtn.dataset.state = state.backend;
+      els.backendBtn.textContent = state.backend === "claude" ? "claude code" : "codex";
+    }
+    await startRefine(target);
+  } else {
+    await startAudit(target);
+  }
 }

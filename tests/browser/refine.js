@@ -1,5 +1,6 @@
 import { handleEvent } from "/js/handlers.js";
 import { state, els } from "/js/state.js";
+import { toggleRunsPanel } from "/js/runs.js";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -25,6 +26,40 @@ try {
   assert(document.querySelectorAll(".status-hacked").length === 0, "Convergence must not retain hacked badges");
   assert(document.querySelector("#stat-high").textContent === "0 High", "Obsolete severity counts must be cleared");
   window.browserRegression.passed.push("round scoreboard reset");
+
+  // Capture actual button requests without starting an audit/model process.
+  const requests = [];
+  window.fetch = async (url, options) => {
+    if (url === "/api/runs") {
+      return { json: async () => ({ runs: [{
+        name: "refine_fixture", target: "fixture", mode: "refine", backend: "claude",
+        max_rounds: 5, status: "failed", phases: {}, total_duration: 0,
+        findings_count: 0, mtime: Date.now() / 1000,
+      }] }) };
+    }
+    requests.push({ url, body: JSON.parse(options.body) });
+    return { json: async () => ({ error: "Test intercepted request" }) };
+  };
+  window.alert = () => {};
+  emit("audit_start", { target: "fixture", mode: "refine", max_rounds: 5 });
+  state.currentRunId = "refine_fixture";
+  state.loadedRunFinished = false;
+  emit("audit_complete", { target: "fixture", failed: true });
+  assert(/restart/i.test(els.continueBtn.textContent), "Refinement failure must offer an explicit restart");
+  els.continueBtn.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(requests[0]?.url === "/api/refine", "Dashboard restart must use refinement API");
+  assert(requests[0].body.max_rounds === 5, "Dashboard restart must retain configured round cap");
+  window.browserRegression.passed.push("dashboard refinement restart");
+  toggleRunsPanel();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const restart = document.querySelector(".run-action-continue");
+  assert(restart && /restart/i.test(restart.textContent), "History must label refinement restart explicitly");
+  restart.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(requests[1]?.url === "/api/refine", "History restart must use refinement API");
+  assert(requests[1].body.max_rounds === 5, "History restart must retain saved round cap");
+  window.browserRegression.passed.push("history refinement restart");
 } catch (error) {
   window.browserRegression.error = error.message;
 } finally {

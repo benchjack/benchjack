@@ -26,8 +26,10 @@ export function updateActionButtons() {
     els.refineControl.style.display = "none";
     els.continueBtn.style.display = "";
     const done = state.loadedRunFinished;
+    els.continueBtn.textContent = state.mode === "refine" ? "Restart refinement" : "Continue";
     els.continueBtn.disabled = done;
-    els.continueBtn.title = done ? "This run is completed" : "";
+    els.continueBtn.title = done ? "This run is completed"
+      : state.mode === "refine" ? "Start again from the original target and archive the previous run" : "";
     els.continueBtn.classList.toggle("btn-continue-done", done);
   } else {
     // No loaded run, or a restart stage is selected → show start/hack/refine

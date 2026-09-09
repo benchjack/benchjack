@@ -80,6 +80,10 @@ export async function cancelAudit() {
 export async function continueRun() {
   const target = els.targetInput.value.trim();
   if (!target) return;
+  if (state.mode === "refine") {
+    await startRefine(target);
+    return;
+  }
 
   resetUIState("audit");
   updateScoreboardEmpty("Continuing audit\u2026");

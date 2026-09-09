@@ -103,6 +103,17 @@ class TestParseStreamJsonLine:
         with pytest.raises(RateLimitError):
             self._parse("Credit balance is too low")
 
+    def test_rate_limit_discussion_is_normal_assistant_output(self):
+        text = "The evaluator has no rate limit, so retries can inflate the score."
+        evt = {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+        assert self._parse(json.dumps(evt)) == [{"msg_type": "text", "text": text}]
+        assert self._parse(json.dumps({"type": "result", "result": text, "is_error": False})) == []
+
+    def test_structured_rate_limit_error_raises(self):
+        evt = {"type": "result", "result": "API rate limit exceeded", "is_error": True}
+        with pytest.raises(RateLimitError):
+            self._parse(json.dumps(evt))
+
     def test_multiple_content_blocks(self):
         evt = {
             "type": "assistant",

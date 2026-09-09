@@ -301,7 +301,9 @@ class AIRunner:
             # The result event duplicates assistant text already streamed
             # above — only check for rate-limit errors, don't re-yield.
             result_text = evt.get("result", "")
-            if isinstance(result_text, str) and _is_backend_limit_error(result_text):
+            if isinstance(result_text, str) and _is_backend_limit_error(
+                result_text, is_error=evt.get("is_error") is True,
+            ):
                 raise RateLimitError(result_text)
 
         # system, rate_limit_event -- silently skipped
@@ -354,12 +356,12 @@ def _summarise_tool_input(name: str, inp: dict) -> str:
     return s if len(s) < 120 else s[:117] + "..."
 
 
-def _is_backend_limit_error(text: str) -> bool:
+def _is_backend_limit_error(text: str, *, is_error: bool = False) -> bool:
     t = text.lower()
     return (
         "you've hit your limit" in t
         or "credit balance is too low" in t
-        or "rate limit" in t
+        or (is_error and "rate limit" in t)
     )
 
 

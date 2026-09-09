@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ..ai_runner import AIRunner
 from ..sandbox import Sandbox
-from .models import EXPLOIT_RESULT_JSONL, EmitFn, clamp_refine_rounds, refine_phases
+from .models import EXPLOIT_RESULT_JSONL, TASK_IDS_JSON, EmitFn, clamp_refine_rounds, refine_phases
 from .prompts import HACK_STAGE1_PROMPT, HACK_STAGE2_PROMPT, PATCH_PROMPT
 from .utils import (
     _derive_benchmark_name,
@@ -51,6 +51,7 @@ class RefinePipeline:
         self.benchmark_path: str | None = None
         self._cancelled = False
         self._stop_reason: str | None = None
+        self._round_task_ids: dict[str, str] | None = None
         self._benchmark_name = "refine_" + _derive_benchmark_name(target)
 
     # ------------------------------------------------------------------
@@ -351,17 +352,27 @@ class RefinePipeline:
 
     def _known_task_total(self, *, fallback: int | None = 1) -> int | None:
         """Return the known task count, or fallback when unavailable."""
+        task_ids = self._round_task_ids if self._round_task_ids is not None else self._current_task_ids()
+        return len(task_ids) if task_ids else fallback
+
+    def _current_task_ids(self) -> dict[str, str]:
         if self.benchmark_path:
             task_ids = _read_task_ids_json(self.benchmark_path)
             if task_ids and "all_tasks" not in task_ids:
-                return len(task_ids)
+                return task_ids
 
         plain_name = self._benchmark_name.removeprefix("refine_")
         task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
         task_ids = _read_task_ids_json(task_ids_dir)
         if task_ids and "all_tasks" not in task_ids:
-            return len(task_ids)
-        return fallback
+            return task_ids
+        return {}
+
+    def _snapshot_task_ids(self, round_n: int):
+        """Keep live metrics and replay tied to the same round's task scope."""
+        self._round_task_ids = self._current_task_ids()
+        path = self.round_dir(round_n) / TASK_IDS_JSON
+        path.write_text(json.dumps(self._round_task_ids, indent=2) + "\n", encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -486,6 +497,7 @@ class RefinePipeline:
         if phase_id.endswith("_attack"):
             self._save_poc_scripts(round_n)
             self._save_exploit_results(round_n)
+            self._snapshot_task_ids(round_n)
 
         self._save_state(phase_id, status, duration)
 
@@ -503,10 +515,9 @@ class RefinePipeline:
     async def _emit_attack_results(self, phase_id: str):
         """Best-effort UI replay; persistence already succeeded by this point."""
         try:
-            plain_name = self._benchmark_name.removeprefix("refine_")
-            task_ids_dir = str(_PROJECT_ROOT / "hacks" / plain_name)
+            round_dir = str(self.jacks_dir / phase_id.split("_")[0])
             task_results, exploit_list = _expand_and_split_exploit_results(
-                self.benchmark_path or "", task_ids_dir
+                round_dir, round_dir
             )
             for tr in task_results:
                 await self.emit("task_result", tr)

@@ -627,3 +627,50 @@ async def test_negative_all_tasks_result_does_not_hide_specific_exploit(tmp_path
     assert len(rounds) == 2
     assert all(data["hacked"] == 1 and data["converged"] is False for data in rounds)
     assert not next(data for kind, data in events if kind == "refine_complete")["converged"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_map_source", ["audit", "workspace", "unknown"])
+async def test_refine_replay_keeps_original_task_scope(tmp_path, monkeypatch, task_map_source):
+    from server import run_state
+    from server.routes import runs as runs_module
+
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runs_module, "_HACKS_ROOT", tmp_path / "hacks")
+    monkeypatch.setattr(runs_module, "_OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(run_state, "active_runs", {})
+    task_map = {"original_a": "a.json", "original_b": "b.json"}
+    audit_dir = tmp_path / "hacks" / "demo"
+    audit_dir.mkdir(parents=True)
+    if task_map_source == "audit":
+        (audit_dir / "benchjack_task_ids.json").write_text(json.dumps(task_map), encoding="utf-8")
+    live = []
+
+    async def emit(kind, data):
+        live.append({"type": kind, "data": data})
+
+    class UniversalAI(AlwaysHackAI):
+        async def stream(self, prompt, cwd=None):
+            async for message in super().stream(prompt, cwd=cwd):
+                yield message
+            if "reward hacking verifier" in prompt:
+                (Path(cwd) / "exploit_result.jsonl").write_text('{"task":"all_tasks","hacked":true}\n', encoding="utf-8")
+                if task_map_source == "workspace":
+                    (Path(cwd) / "benchjack_task_ids.json").write_text(json.dumps(task_map), encoding="utf-8")
+
+    pipeline = RefinePipeline("demo", emit, UniversalAI(), Sandbox(str(tmp_path), enabled=False), max_rounds=1)
+    await pipeline.run()
+    expected_ids = {"all_tasks"} if task_map_source == "unknown" else set(task_map)
+    assert {e["data"]["task"] for e in live if e["type"] == "task_result"} == expected_ids
+    expected_count = None if task_map_source == "unknown" else 2
+    round_result = next(e["data"] for e in live if e["type"] == "refine_round_complete")
+    assert round_result["total"] == expected_count
+
+    # Later audits and workspace edits must not rewrite an older round's scope.
+    changed_map = json.dumps({f"new_{n}": "new.json" for n in range(5)})
+    (audit_dir / "benchjack_task_ids.json").write_text(changed_map, encoding="utf-8")
+    (Path(pipeline.benchmark_path) / "benchjack_task_ids.json").write_text(changed_map, encoding="utf-8")
+    await runs_module.load_run("refine_demo")
+    history = run_state.active_runs["refine_demo"]["bus"]._history
+    for kind in ("task_result", "exploit_results", "refine_round_complete"):
+        assert [e["data"] for e in history if e["type"] == kind] == [e["data"] for e in live if e["type"] == kind]

@@ -272,12 +272,12 @@ async def load_run(name: str):
             run_mode == "refine" and phase_id.endswith("_attack") and phase_status == "completed"
         ):
             run_dir = str(_HACKS_ROOT / name)
-            # For hack/refine runs, task IDs live in the corresponding audit dir.
+            # Refinement snapshots scope per round; hack runs use the audit map.
             if run_mode == "hack":
                 task_ids_dir = str(_HACKS_ROOT / name.removeprefix("hack_"))
             elif run_mode == "refine":
-                task_ids_dir = str(_HACKS_ROOT / name.removeprefix("refine_"))
                 run_dir = str(_HACKS_ROOT / name / phase_id.split("_")[0])
+                task_ids_dir = run_dir
             else:
                 task_ids_dir = run_dir
             task_results, exploit_list = _expand_and_split_exploit_results(

@@ -237,9 +237,9 @@ export function handleEvent(event) {
 
     case "refine_round_complete": {
       const roundN = data.round;
-      const hackRate = data.hack_rate ?? 0;
-      const hacked = data.hacked ?? 0;
-      const total = data.total ?? 0;
+      const hackRate = data.hack_rate;
+      const hacked = data.hacked;
+      const total = data.total;
       const converged = data.converged ?? false;
 
       // Mark the round segment in the refine progress bar
@@ -259,9 +259,14 @@ export function handleEvent(event) {
       }
 
       // Update summary message with per-round hack rate
-      const pct = total > 0 ? Math.round(hackRate * 100) : 0;
+      const pct = hackRate == null ? null : Math.round(hackRate * 100);
+      const unknownScope = hacked == null
+        ? "benchmark-wide exploit confirmed; task count unknown"
+        : `${hacked} confirmed hacked task(s); total task count unknown`;
       els.summaryMsg.textContent = converged
         ? `Round ${roundN}: converged — benchmark defended (0% hacked)`
+        : total == null || pct == null
+        ? `Round ${roundN} complete — ${unknownScope}`
         : `Round ${roundN} complete — ${pct}% hacked (${hacked}/${total} tasks)`;
       break;
     }

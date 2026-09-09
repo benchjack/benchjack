@@ -201,16 +201,16 @@ async def test_refine_runs_patch_then_converges_on_next_attack(tmp_path, monkeyp
     assert round_events == [
         {
             "round": 1,
-            "hack_rate": 1.0,
+            "hack_rate": None,
             "hacked": 1,
-            "total": 1,
+            "total": None,
             "converged": False,
         },
         {
             "round": 2,
             "hack_rate": 0.0,
             "hacked": 0,
-            "total": 1,
+            "total": None,
             "converged": True,
         },
     ]
@@ -253,7 +253,7 @@ async def test_refine_custom_round_count_runs_extra_round(tmp_path, monkeypatch)
     ]
     assert complete_events == [{
         "converged": False,
-        "final_hack_rate": 1.0,
+        "final_hack_rate": None,
         "max_rounds": 4,
     }]
     state = json.loads((tmp_path / "hacks" / "refine_benchmark" / "state.json").read_text())
@@ -467,3 +467,13 @@ async def test_defender_evidence_paths_match_execution_environment(tmp_path, mon
         assert str(pipeline.round_dir(2) / "exploit_result.jsonl") in prompt
         assert str(pipeline.jacks_dir / "summary" / "r2_attack.md") in prompt
         assert cwd == pipeline.benchmark_path
+
+
+@pytest.mark.parametrize("successes", [1, 10])
+def test_refine_does_not_invent_denominator(tmp_path, monkeypatch, successes):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    rows = [{"task": f"task_{n}", "hacked": True} for n in range(successes)]
+    (tmp_path / "exploit_result.jsonl").write_text("\n".join(map(json.dumps, rows)), encoding="utf-8")
+    pipeline = RefinePipeline("demo", None, FakeAI(), Sandbox(str(tmp_path), enabled=False))
+    pipeline.benchmark_path = str(tmp_path)
+    assert pipeline._compute_hack_rate() == (None, successes, None)

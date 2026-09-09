@@ -119,11 +119,14 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
         elif event_type == "refine_round_complete":
             _clear_status()
             rn = data.get("round", "?")
-            rate = data.get("hack_rate", 0)
+            rate = data.get("hack_rate")
             hacked = data.get("hacked", 0)
             total_t = data.get("total", 0)
             if data.get("converged"):
                 print(f"\n  >> Round {rn}: CONVERGED — benchmark defended (0% hacked)")
+            elif total_t is None:
+                count = f"{hacked} confirmed hacked task(s)" if hacked is not None else "Benchmark-wide exploit confirmed"
+                print(f"\n  >> Round {rn} complete: {count}; total task count unknown")
             else:
                 pct = round(rate * 100, 1)
                 print(f"\n  >> Round {rn} complete: {pct}% hacked ({hacked}/{total_t} tasks)")
@@ -134,9 +137,9 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
                 print("\n  >> Refinement converged — exploit patched successfully")
             else:
                 rate = data.get("final_hack_rate")
-                pct = round(rate * 100, 1) if rate is not None else "?"
+                score = f"{round(rate * 100, 1)}%" if rate is not None else "hack rate unknown"
                 rounds = data.get("max_rounds", refine_rounds)
-                print(f"\n  >> Refinement complete - benchmark still hackable ({pct}% after {rounds} rounds)")
+                print(f"\n  >> Refinement complete - benchmark still hackable ({score} after {rounds} rounds)")
 
         elif event_type == "audit_complete":
             _clear_status()

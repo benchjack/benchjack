@@ -212,7 +212,7 @@ class RefinePipeline:
             last_hack_rate = hack_rate
 
             # --- Convergence check ---
-            if total > 0 and hack_rate == 0.0:
+            if hacked == 0:
                 converged = True
                 await self.emit("refine_round_complete", {
                     "round": round_n,
@@ -244,7 +244,7 @@ class RefinePipeline:
             # --- Emit round complete ---
             await self.emit("refine_round_complete", {
                 "round": round_n,
-                "hack_rate": round(hack_rate, 3),
+                "hack_rate": round(hack_rate, 3) if hack_rate is not None else None,
                 "hacked": hacked,
                 "total": total,
                 "converged": False,
@@ -260,7 +260,7 @@ class RefinePipeline:
     # Hack-rate computation
     # ------------------------------------------------------------------
 
-    def _compute_hack_rate(self) -> tuple[float, int, int]:
+    def _compute_hack_rate(self) -> tuple[float | None, int | None, int | None]:
         """Read exploit_result.jsonl from workspace and return (rate, hacked, total).
 
         Handles the ``"all_tasks"`` sentinel: looks up the real task count from
@@ -272,12 +272,12 @@ class RefinePipeline:
         results = self._read_verified_results()
         known_total = self._known_task_total(fallback=None)
         if not results:
-            return 0.0, 0, known_total or 1
+            return 0.0, 0, known_total
 
         # Detect "all_tasks" sentinel
         has_all_tasks = any(r["task"] == "all_tasks" for r in results)
         if has_all_tasks:
-            total = known_total or 1
+            total = known_total
             all_hacked = any(
                 r["task"] == "all_tasks" and r.get("hacked") for r in results
             )
@@ -285,17 +285,14 @@ class RefinePipeline:
                 return 1.0, total, total
             return 0.0, 0, total
 
-        result_tasks = {
-            r["task"] for r in results
-            if r.get("task") and r.get("task") != "all_tasks"
-        }
-        total = known_total or len(result_tasks)
-        if total == 0:
-            return 0.0, 0, 0
         hacked_tasks = {
             r["task"] for r in results
             if r.get("task") and r.get("hacked")
         }
+        if known_total is None:
+            hacked = len(hacked_tasks)
+            return (None if hacked else 0.0), hacked, None
+        total = known_total
         hacked = min(len(hacked_tasks), total)
         return hacked / total, hacked, total
 

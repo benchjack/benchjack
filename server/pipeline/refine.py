@@ -311,16 +311,9 @@ class RefinePipeline:
         if not results:
             return 0.0, 0, known_total
 
-        # Detect "all_tasks" sentinel
-        has_all_tasks = any(r["task"] == "all_tasks" for r in results)
-        if has_all_tasks:
-            total = known_total
-            all_hacked = any(
-                r["task"] == "all_tasks" and r.get("hacked") for r in results
-            )
-            if all_hacked:
-                return 1.0, total, total
-            return 0.0, 0, total
+        # A failed universal exploit does not negate successful specific ones.
+        if any(r["task"] == "all_tasks" and r["hacked"] for r in results):
+            return 1.0, known_total, known_total
 
         hacked_tasks = {
             r["task"] for r in results

@@ -603,3 +603,27 @@ async def test_refine_honors_only_fresh_defender_stop_note(tmp_path, monkeypatch
     for events in (live, history):
         final = next(e["data"] for e in events if e["type"] == "audit_complete")
         assert final.get("stop_reason") == completed.get("stop_reason")
+
+
+@pytest.mark.asyncio
+async def test_negative_all_tasks_result_does_not_hide_specific_exploit(tmp_path, monkeypatch):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    events = []
+
+    async def emit(kind, data):
+        events.append((kind, data))
+
+    class MixedResultsAI(AlwaysHackAI):
+        async def stream(self, prompt, cwd=None):
+            async for message in super().stream(prompt, cwd=cwd):
+                yield message
+            if "reward hacking verifier" in prompt:
+                with (Path(cwd) / "exploit_result.jsonl").open("a", encoding="utf-8") as file:
+                    file.write('{"task":"all_tasks","hacked":false}\n')
+
+    pipeline = RefinePipeline("demo", emit, MixedResultsAI(), Sandbox(str(tmp_path), enabled=False), max_rounds=2)
+    await pipeline.run()
+    rounds = [data for kind, data in events if kind == "refine_round_complete"]
+    assert len(rounds) == 2
+    assert all(data["hacked"] == 1 and data["converged"] is False for data in rounds)
+    assert not next(data for kind, data in events if kind == "refine_complete")["converged"]

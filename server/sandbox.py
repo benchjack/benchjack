@@ -514,6 +514,12 @@ class Sandbox:
         if not network:
             args += ["--network", "none"]
         if ai:
+            # Defender phases also need evidence when the persistent container
+            # is unavailable and an ephemeral AI container is used.
+            if self._output_dir:
+                args += ["-v", f"{self._output_dir}:/output"]
+            if self._jacks_dir:
+                args += ["-v", f"{self._jacks_dir}:/hacks"]
             # Prefer explicit ANTHROPIC_API_KEY from the environment (stable);
             # only fall back to the short-lived OAuth access token from Keychain.
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")

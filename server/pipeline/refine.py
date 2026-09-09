@@ -527,8 +527,12 @@ class RefinePipeline:
 
     async def _phase_patch(self, round_n: int) -> str:
         phase_id = f"r{round_n}_patch"
-        exploit_path = str(self.round_dir(round_n) / EXPLOIT_RESULT_JSONL)
-        findings_path = str(self.jacks_dir / "summary" / f"r{round_n}_attack.md")
+        if self.sandbox.enabled:
+            exploit_path = f"/hacks/r{round_n}/{EXPLOIT_RESULT_JSONL}"
+            findings_path = f"/hacks/summary/r{round_n}_attack.md"
+        else:
+            exploit_path = str(self.round_dir(round_n) / EXPLOIT_RESULT_JSONL)
+            findings_path = str(self.jacks_dir / "summary" / f"r{round_n}_attack.md")
         prompt = PATCH_PROMPT.format(
             workspace=self.sandbox.workspace,
             exploit_path=exploit_path,

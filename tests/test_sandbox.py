@@ -115,3 +115,15 @@ async def test_main_container_places_user_args_before_image(tmp_path, monkeypatc
     user_index = args.index("--user")
     assert user_index < image_index
     assert args[image_index + 1:image_index + 3] == ["sleep", "infinity"]
+
+
+def test_ephemeral_ai_mounts_registered_evidence_directories(tmp_path, monkeypatch):
+    sb = Sandbox(str(tmp_path), enabled=False)
+    sb.set_dirs(str(tmp_path / "output"), str(tmp_path / "hacks"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(sb, "_prepare_claude_dir", lambda: None)
+    sb._claude_dir = str(tmp_path / "home")
+    args = sb._base_docker_args(network=True, ai=True)
+    mounts = [args[i + 1] for i, value in enumerate(args) if value == "-v"]
+    assert str(tmp_path / "hacks") + ":/hacks" in mounts
+    assert str(tmp_path / "output") + ":/output" in mounts

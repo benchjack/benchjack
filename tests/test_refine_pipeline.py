@@ -433,3 +433,37 @@ async def test_refine_requires_verifier_to_replace_attacker_results(tmp_path, mo
     pipeline = RefinePipeline("demo", emit, StaleAI(), Sandbox(str(tmp_path), enabled=False))
     with pytest.raises(RuntimeError, match="[Vv]erification"):
         await pipeline.run()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sandboxed", [False, True])
+async def test_defender_evidence_paths_match_execution_environment(tmp_path, monkeypatch, sandboxed):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    captured = []
+
+    class CaptureAI:
+        backend = "fake"
+
+        async def stream(self, prompt, cwd=None):
+            captured.append((prompt, cwd))
+            yield {"msg_type": "text", "text": "defender response"}
+
+    async def emit(kind, data):
+        pass
+
+    sandbox = Sandbox(str(tmp_path), enabled=False)
+    sandbox.enabled = sandboxed
+    pipeline = RefinePipeline("demo", emit, CaptureAI(), sandbox)
+    pipeline._ensure_dirs()
+    pipeline.benchmark_path = str(tmp_path / "repo")
+    sandbox.set_benchmark_path(pipeline.benchmark_path)
+    await pipeline._phase_patch(2)
+    prompt, cwd = captured[0]
+    if sandboxed:
+        assert "/hacks/r2/exploit_result.jsonl" in prompt
+        assert "/hacks/summary/r2_attack.md" in prompt
+        assert cwd == "/workspace"
+    else:
+        assert str(pipeline.round_dir(2) / "exploit_result.jsonl") in prompt
+        assert str(pipeline.jacks_dir / "summary" / "r2_attack.md") in prompt
+        assert cwd == pipeline.benchmark_path

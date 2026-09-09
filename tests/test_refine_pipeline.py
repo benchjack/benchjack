@@ -555,3 +555,51 @@ async def test_refine_new_run_archives_previous_results(tmp_path, monkeypatch):
     archived = list((tmp_path / "hacks-archive" / "refine_demo").glob("*/hacks/r3/exploit_result.jsonl"))
     assert len(archived) == 1
     assert json.loads(archived[0].read_text(encoding="utf-8"))["hacked"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defender_cannot_patch", [True, False])
+async def test_refine_honors_only_fresh_defender_stop_note(tmp_path, monkeypatch, defender_cannot_patch):
+    from server import run_state
+    from server.routes import runs as runs_module
+
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runs_module, "_HACKS_ROOT", tmp_path / "hacks")
+    monkeypatch.setattr(runs_module, "_OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(run_state, "active_runs", {})
+    live = []
+
+    async def emit(kind, data):
+        live.append({"type": kind, "data": data})
+
+    class StopNoteAI(AlwaysHackAI):
+        async def stream(self, prompt, cwd=None):
+            if "benchmark security hardener" in prompt:
+                assert not (Path(cwd) / "CANNOT_PATCH.md").exists()
+                if defender_cannot_patch:
+                    (Path(cwd) / "CANNOT_PATCH.md").write_text("Requires evaluator redesign", encoding="utf-8")
+            else:
+                (Path(cwd) / "CANNOT_PATCH.md").write_text("Stale attacker note", encoding="utf-8")
+            async for message in super().stream(prompt, cwd=cwd):
+                yield message
+
+    pipeline = RefinePipeline("demo", emit, StopNoteAI(), Sandbox(str(tmp_path), enabled=False))
+    await pipeline.run()
+    completed = next(e["data"] for e in live if e["type"] == "refine_complete")
+    started = [e["data"]["phase"] for e in live if e["type"] == "phase_start"]
+    assert completed["converged"] is False
+    if defender_cannot_patch:
+        assert started == ["r1_attack", "r1_patch"]
+        assert completed["stop_reason"] == "cannot_patch"
+        assert (pipeline.round_dir(1) / "CANNOT_PATCH.md").read_text(encoding="utf-8") == "Requires evaluator redesign"
+        assert all(e["data"]["reason"] == "cannot_patch" for e in live if e["type"] == "phase_skip")
+    else:
+        assert started[-1] == "r3_attack"
+        assert "stop_reason" not in completed
+    loaded = await runs_module.load_run("refine_demo")
+    assert loaded["finished"] is True
+    history = run_state.active_runs["refine_demo"]["bus"]._history
+    assert next(e["data"] for e in history if e["type"] == "refine_complete") == completed
+    for events in (live, history):
+        final = next(e["data"] for e in events if e["type"] == "audit_complete")
+        assert final.get("stop_reason") == completed.get("stop_reason")

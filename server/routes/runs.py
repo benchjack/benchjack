@@ -319,6 +319,7 @@ async def load_run(name: str):
             )),
             "final_hack_rate": state.get("final_hack_rate"),
             "max_rounds": max_rounds,
+            **({"stop_reason": state["stop_reason"]} if state.get("stop_reason") else {}),
         })
 
     await bus.publish("audit_complete", {
@@ -327,6 +328,7 @@ async def load_run(name: str):
         "findings": findings,
         "failed": False,
         "loaded_from_history": True,
+        **({"stop_reason": state["stop_reason"]} if run_mode == "refine" and state.get("stop_reason") else {}),
     })
 
     run_state.active_runs[name] = {

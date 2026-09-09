@@ -298,14 +298,17 @@ export function handleEvent(event) {
       setRunning(false);
       state.auditDone = true;
       if (state.mode === "refine") {
-        els.summaryMsg.textContent = `Refinement complete for ${data.target}`;
-        // Auto-switch to the last active attack tab
-        const lastAttack = Array.from(
+        const cannotPatch = data.stop_reason === "cannot_patch";
+        els.summaryMsg.textContent = cannotPatch
+          ? `Refinement stopped for ${data.target}: defender cannot patch without redesign`
+          : `Refinement complete for ${data.target}`;
+        // Show the defender's explanation when redesign is required.
+        const lastPhase = Array.from(
           { length: state.refineMaxRounds },
-          (_, i) => `r${state.refineMaxRounds - i}_attack`,
+          (_, i) => `r${state.refineMaxRounds - i}_${cannotPatch ? "patch" : "attack"}`,
         ).find((p) => state.phaseSummary[p]);
-        if (lastAttack) {
-          switchTab(lastAttack); setView("summary"); state.userPickedTab = false;
+        if (lastPhase) {
+          switchTab(lastPhase); setView("summary"); state.userPickedTab = false;
         }
       } else if (state.mode === "hack") {
         els.summaryMsg.textContent = `Hack complete for ${data.target}`;

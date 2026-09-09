@@ -135,6 +135,8 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
             _clear_status()
             if data.get("converged"):
                 print("\n  >> Refinement converged — exploit patched successfully")
+            elif data.get("stop_reason") == "cannot_patch":
+                print("\n  >> Refinement stopped — defender cannot patch without redesign; see CANNOT_PATCH.md")
             else:
                 rate = data.get("final_hack_rate")
                 score = f"{round(rate * 100, 1)}%" if rate is not None else "hack rate unknown"

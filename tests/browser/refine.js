@@ -27,6 +27,12 @@ try {
   assert(document.querySelector("#stat-high").textContent === "0 High", "Obsolete severity counts must be cleared");
   window.browserRegression.passed.push("round scoreboard reset");
 
+  emit("audit_start", { target: "fixture", mode: "refine", max_rounds: 3 });
+  emit("refine_complete", { converged: false, stop_reason: "cannot_patch", max_rounds: 3 });
+  emit("audit_complete", { target: "fixture", failed: false, stop_reason: "cannot_patch" });
+  assert(/cannot patch/i.test(els.summaryMsg.textContent), "Completion must preserve the defender stop reason");
+  window.browserRegression.passed.push("unpatchable outcome");
+
   // Capture actual button requests without starting an audit/model process.
   const requests = [];
   window.fetch = async (url, options) => {

@@ -4,7 +4,8 @@ RefinePipeline — iterative attacker/defender loop (Section 4.3).
 Phases: rN_attack, with rN_patch after every non-final attack round.
 The default cap is 3 rounds, but callers may configure a larger bounded cap.
 Early exit: if hack_rate == 0 after any attack round, remaining rounds are
-skipped and convergence is declared.
+skipped and convergence is declared. Stop when the defender cannot patch the
+benchmark without redesign.
 """
 import asyncio
 import json
@@ -49,6 +50,7 @@ class RefinePipeline:
 
         self.benchmark_path: str | None = None
         self._cancelled = False
+        self._stop_reason: str | None = None
         self._benchmark_name = "refine_" + _derive_benchmark_name(target)
 
     # ------------------------------------------------------------------
@@ -83,6 +85,7 @@ class RefinePipeline:
             "total_findings": 0,
             "findings": [],
             "failed": False,
+            **({"stop_reason": self._stop_reason} if self._stop_reason else {}),
         })
 
     def cancel(self):
@@ -261,6 +264,10 @@ class RefinePipeline:
                     lambda rn=round_n: self._phase_patch(rn),
                     round_n=round_n,
                 )
+                note = Path(self.benchmark_path) / "CANNOT_PATCH.md"
+                if note.is_file():
+                    shutil.copy2(note, self.round_dir(round_n) / note.name)
+                    self._stop_reason = "cannot_patch"
 
             # --- Emit round complete ---
             await self._complete_round({
@@ -270,11 +277,18 @@ class RefinePipeline:
                 "total": total,
                 "converged": False,
             })
+            if self._stop_reason:
+                for remaining in range(round_n + 1, self.max_rounds + 1):
+                    await self._skip_phase(f"r{remaining}_attack", self._stop_reason)
+                    if remaining < self.max_rounds:
+                        await self._skip_phase(f"r{remaining}_patch", self._stop_reason)
+                break
 
         result = {
             "converged": converged,
             "final_hack_rate": round(last_hack_rate, 3) if last_hack_rate is not None else None,
             "max_rounds": self.max_rounds,
+            **({"stop_reason": self._stop_reason} if self._stop_reason else {}),
         }
         self._save_refinement_result(result)
         await self.emit("refine_complete", result)
@@ -560,6 +574,8 @@ class RefinePipeline:
 
     async def _phase_patch(self, round_n: int) -> str:
         phase_id = f"r{round_n}_patch"
+        # Only a note produced by this defender call can terminate the loop.
+        (Path(self.benchmark_path) / "CANNOT_PATCH.md").unlink(missing_ok=True)
         if self.sandbox.enabled:
             exploit_path = f"/hacks/r{round_n}/{EXPLOIT_RESULT_JSONL}"
             findings_path = f"/hacks/summary/r{round_n}_attack.md"

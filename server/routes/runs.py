@@ -299,10 +299,10 @@ async def load_run(name: str):
 
     if run_mode == "refine" and all_completed:
         await bus.publish("refine_complete", {
-            "converged": any(
+            "converged": state.get("converged", any(
                 phases_meta.get(pid, {}).get("status") == "skipped"
                 for pid, _ in phase_list
-            ),
+            )),
             "final_hack_rate": state.get("final_hack_rate"),
             "max_rounds": max_rounds,
         })

@@ -214,7 +214,7 @@ class RefinePipeline:
             # --- Convergence check ---
             if hacked == 0:
                 converged = True
-                await self.emit("refine_round_complete", {
+                await self._complete_round({
                     "round": round_n,
                     "hack_rate": 0.0,
                     "hacked": 0,
@@ -242,7 +242,7 @@ class RefinePipeline:
                 )
 
             # --- Emit round complete ---
-            await self.emit("refine_round_complete", {
+            await self._complete_round({
                 "round": round_n,
                 "hack_rate": round(hack_rate, 3) if hack_rate is not None else None,
                 "hacked": hacked,
@@ -250,11 +250,13 @@ class RefinePipeline:
                 "converged": False,
             })
 
-        await self.emit("refine_complete", {
+        result = {
             "converged": converged,
             "final_hack_rate": round(last_hack_rate, 3) if last_hack_rate is not None else None,
             "max_rounds": self.max_rounds,
-        })
+        }
+        self._save_refinement_result(result)
+        await self.emit("refine_complete", result)
 
     # ------------------------------------------------------------------
     # Hack-rate computation
@@ -336,6 +338,19 @@ class RefinePipeline:
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
+
+    def _save_refinement_result(self, result: dict, *, round_n: int | None = None):
+        path = self.jacks_dir / "state.json"
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if round_n is None:
+            state.update(result)
+        else:
+            state.setdefault("rounds", {})[str(round_n)] = result
+        path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+    async def _complete_round(self, result: dict):
+        self._save_refinement_result(result, round_n=result["round"])
+        await self.emit("refine_round_complete", result)
 
     async def _skip_phase(self, phase_id: str, reason: str):
         self._save_state(phase_id, "skipped", 0.0)

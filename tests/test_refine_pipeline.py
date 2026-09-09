@@ -477,3 +477,31 @@ def test_refine_does_not_invent_denominator(tmp_path, monkeypatch, successes):
     pipeline = RefinePipeline("demo", None, FakeAI(), Sandbox(str(tmp_path), enabled=False))
     pipeline.benchmark_path = str(tmp_path)
     assert pipeline._compute_hack_rate() == (None, successes, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rounds,ai_type", [(1, FakeAI), (2, LoopAI), (1, AlwaysHackAI)])
+async def test_refine_completion_survives_reload(tmp_path, monkeypatch, rounds, ai_type):
+    from server import run_state
+    from server.routes import runs as runs_module
+
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runs_module, "_HACKS_ROOT", tmp_path / "hacks")
+    monkeypatch.setattr(runs_module, "_OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(run_state, "active_runs", {})
+    live = []
+
+    async def emit(kind, data):
+        live.append({"type": kind, "data": data})
+
+    pipeline = RefinePipeline("demo", emit, ai_type(), Sandbox(str(tmp_path), enabled=False), max_rounds=rounds)
+    await pipeline.run()
+    await runs_module.load_run("refine_demo")
+    history = run_state.active_runs["refine_demo"]["bus"]._history
+    completed = next(e["data"] for e in live if e["type"] == "refine_complete")
+    replayed = next(e["data"] for e in history if e["type"] == "refine_complete")
+    assert replayed == completed
+    state = json.loads((pipeline.jacks_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["converged"] == completed["converged"]
+    assert state["final_hack_rate"] == completed["final_hack_rate"]
+    assert list(state["rounds"].values()) == [e["data"] for e in live if e["type"] == "refine_round_complete"]

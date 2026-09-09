@@ -328,13 +328,13 @@ def main():
     mode_group.add_argument(
         "--refine-it",
         action="store_true",
-        help="Run the iterative refinement pipeline in CLI mode (default: 3 attack/patch rounds)",
+        help="Run iterative refinement in CLI mode (default: 3 attacks with up to 2 patches)",
     )
     parser.add_argument(
         "--refine-rounds",
         type=int,
         default=3,
-        help="Number of iterative refinement rounds for --refine-it (default: 3, max: 10)",
+        help="Attack passes for --refine-it, with patches between passes (default: 3, max: 10)",
     )
     args = parser.parse_args()
 

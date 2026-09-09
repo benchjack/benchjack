@@ -98,7 +98,7 @@ export function setRefineRounds(value) {
   els.refineBtn.textContent = state.refineMaxRounds === DEFAULT_REFINE_ROUNDS
     ? "~ Refine"
     : `~ Refine ${state.refineMaxRounds}r`;
-  els.refineMenuBtn.title = `Refine rounds: ${state.refineMaxRounds}`;
+  els.refineMenuBtn.title = `Up to ${state.refineMaxRounds} attacks and ${state.refineMaxRounds - 1} patches`;
   $$(".refine-round-option").forEach((btn) => {
     btn.classList.toggle("active", Number.parseInt(btn.dataset.rounds, 10) === state.refineMaxRounds);
   });

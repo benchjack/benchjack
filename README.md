@@ -146,9 +146,21 @@ Options:
   --poc-level LEVEL   PoC generation: full | partial | skip  (default: partial)
   --audit             Audit mode (default)
   --hack-it           Reward-hack mode
+  --refine-it         Iterative attacker/defender mode
+  --refine-rounds N   Attack passes, with patches between them (default: 3, max: 10)
   --sandbox           Run inside Docker sandbox
   --no-sandbox        Run on host (default)
 ```
+
+Refinement counts attack passes. The default cap of three runs an initial
+attack, then up to two patch-and-attack cycles. Use `--refine-rounds 4` for an
+initial attack followed by up to three patch cycles. The final attack checks
+the last patch and is not followed by another patch.
+
+The loop stops early when verification finds no successful exploits or the
+defender writes `CANNOT_PATCH.md` because the benchmark needs redesign. A
+failed run's **Restart refinement** action starts from the original target.
+It preserves the old workspace and evidence under `hacks-archive/`.
 
 ### Examples
 

@@ -21,7 +21,6 @@ from .prompts import HACK_STAGE1_PROMPT, HACK_STAGE2_PROMPT, PATCH_PROMPT
 from .utils import (
     _derive_benchmark_name,
     _expand_and_split_exploit_results,
-    _read_exploit_results,
     _read_task_ids_json,
     _read_task_results_jsonl,
 )
@@ -270,7 +269,7 @@ class RefinePipeline:
         if not self.benchmark_path:
             return 0.0, 0, 0
 
-        results = _read_exploit_results(self.benchmark_path)
+        results = self._read_verified_results()
         known_total = self._known_task_total(fallback=None)
         if not results:
             return 0.0, 0, known_total or 1
@@ -299,6 +298,29 @@ class RefinePipeline:
         }
         hacked = min(len(hacked_tasks), total)
         return hacked / total, hacked, total
+
+    def _read_verified_results(self) -> list[dict]:
+        """Require a complete JSONL artifact, including an explicit empty result."""
+        path = Path(self.benchmark_path) / EXPLOIT_RESULT_JSONL
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise RuntimeError(f"Verification results are missing or unreadable: {path}") from exc
+        results = []
+        for line_number, line in enumerate(content.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Invalid verification result on line {line_number}") from exc
+            if (not isinstance(row, dict)
+                    or not isinstance(row.get("task"), str)
+                    or not row["task"].strip()
+                    or not isinstance(row.get("hacked"), bool)):
+                raise RuntimeError(f"Invalid verification result on line {line_number}")
+            results.append({**row, "task": row["task"].strip()})
+        return results
 
     def _known_task_total(self, *, fallback: int | None = 1) -> int | None:
         """Return the known task count, or fallback when unavailable."""
@@ -487,7 +509,17 @@ class RefinePipeline:
             benchmark=self.target,
             workspace=self.sandbox.workspace,
         )
-        return await self._ai_phase(phase_id, prompt2)
+        # The verifier must produce its own result, not reuse an earlier attack.
+        (Path(self.benchmark_path) / EXPLOIT_RESULT_JSONL).unlink(missing_ok=True)
+        prompt2 += (
+            "\nOnly write verification results after evaluation has completed. "
+            "If setup or evaluation cannot complete, report the failure and leave "
+            "the result file absent. An empty file means evaluation completed "
+            "and confirmed no successful exploits.\n"
+        )
+        output = await self._ai_phase(phase_id, prompt2)
+        self._read_verified_results()
+        return output
 
     # ------------------------------------------------------------------
     # Phase: Patch

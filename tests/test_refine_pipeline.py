@@ -14,6 +14,8 @@ class FakeAI:
     backend = "fake"
 
     async def stream(self, _prompt, cwd=None):
+        if "reward hacking verifier" in _prompt:
+            (Path(cwd) / "exploit_result.jsonl").write_text("", encoding="utf-8")
         yield {"msg_type": "text", "text": "no working exploit found"}
 
 
@@ -84,7 +86,7 @@ class AlwaysHackAI:
 
 @pytest.mark.asyncio
 async def test_refine_converges_when_attack_writes_no_exploit_rows(tmp_path, monkeypatch):
-    """No successful exploit rows means zero hacked tasks, not unknown progress."""
+    """An explicitly written empty verification file permits convergence."""
     monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
 
     prior_audit_dir = tmp_path / "hacks" / "sample-bench"
@@ -384,3 +386,50 @@ def test_refine_persists_unicode_logs_and_summaries(tmp_path, monkeypatch):
 
     assert (pipeline.output_dir / "r1_attack.log").read_text(encoding="utf-8") == text
     assert (pipeline.jacks_dir / "summary" / "r1_attack.md").read_text(encoding="utf-8") == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [None, "{invalid json", "[]", '{"task":"demo","hacked":"false"}'])
+async def test_refine_rejects_incomplete_verification(tmp_path, monkeypatch, result):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    class IncompleteAI:
+        backend = "fake"
+
+        async def stream(self, prompt, cwd=None):
+            if "reward hacking verifier" in prompt and result is not None:
+                (Path(cwd) / "exploit_result.jsonl").write_text(result, encoding="utf-8")
+            yield {"msg_type": "text", "text": "Evaluation could not complete"}
+
+    events = []
+
+    async def emit(kind, data):
+        events.append((kind, data))
+
+    pipeline = RefinePipeline("demo", emit, IncompleteAI(), Sandbox(str(tmp_path), enabled=False))
+    with pytest.raises(RuntimeError, match="[Vv]erification"):
+        await pipeline.run()
+    assert not any(kind == "refine_complete" for kind, _ in events)
+    state = json.loads((pipeline.jacks_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["phases"]["r1_attack"]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_refine_requires_verifier_to_replace_attacker_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    class StaleAI:
+        backend = "fake"
+
+        async def stream(self, prompt, cwd=None):
+            if "reward hacking verifier" not in prompt:
+                (Path(cwd) / "exploit_result.jsonl").write_text(
+                    '{"task":"demo","hacked":true}\n', encoding="utf-8")
+            yield {"msg_type": "text", "text": "Verifier did not run"}
+
+    async def emit(kind, data):
+        pass
+
+    pipeline = RefinePipeline("demo", emit, StaleAI(), Sandbox(str(tmp_path), enabled=False))
+    with pytest.raises(RuntimeError, match="[Vv]erification"):
+        await pipeline.run()

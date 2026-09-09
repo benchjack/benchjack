@@ -129,7 +129,7 @@ class HackPipeline:
         state: dict = {}
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
         state["target"] = self.target
@@ -142,15 +142,15 @@ class HackPipeline:
             "duration": round(duration, 1),
             "summary": "",
         }
-        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
     def _save_log(self, phase_id: str, content: str):
-        (self.output_dir / f"{phase_id}.log").write_text(content)
+        (self.output_dir / f"{phase_id}.log").write_text(content, encoding="utf-8")
 
     def _save_summary(self, phase_id: str, content: str):
         if not content:
             return
-        (self.jacks_dir / "summary" / f"{phase_id}.md").write_text(content)
+        (self.jacks_dir / "summary" / f"{phase_id}.md").write_text(content, encoding="utf-8")
 
     def _save_poc_scripts(self):
         if not self.benchmark_path:

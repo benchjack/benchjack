@@ -162,12 +162,12 @@ class AuditPipeline:
     # ------------------------------------------------------------------
 
     def _save_log(self, phase_id: str, content: str):
-        (self.output_dir / f"{phase_id}.log").write_text(content)
+        (self.output_dir / f"{phase_id}.log").write_text(content, encoding="utf-8")
 
     def _save_summary(self, phase_id: str, content: str):
         if not content:
             return
-        (self.jacks_dir / "summary" / f"{phase_id}.md").write_text(content)
+        (self.jacks_dir / "summary" / f"{phase_id}.md").write_text(content, encoding="utf-8")
 
     def _save_state(self, phase_id: str, result: PhaseResult):
         """Update hacks/state.json with this phase's metadata."""
@@ -175,7 +175,7 @@ class AuditPipeline:
         state: dict = {}
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
         state["target"] = self.target
@@ -188,23 +188,23 @@ class AuditPipeline:
             "duration": round(result.duration, 1),
             "summary": result.summary,
         }
-        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
     def _save_findings(self):
         path = self.jacks_dir / "findings.json"
-        path.write_text(json.dumps([asdict(f) for f in self.findings], indent=2) + "\n")
+        path.write_text(json.dumps([asdict(f) for f in self.findings], indent=2) + "\n", encoding="utf-8")
 
     def _save_task_results(self):
         if not self._task_results:
             return
         path = self.jacks_dir / "task_results.json"
-        path.write_text(json.dumps(self._task_results, indent=2) + "\n")
+        path.write_text(json.dumps(self._task_results, indent=2) + "\n", encoding="utf-8")
 
     def _save_task_ids(self):
         if not self._task_ids:
             return
         path = self.jacks_dir / "task_ids.json"
-        path.write_text(json.dumps(self._task_ids, indent=2) + "\n")  # dict {id: path}
+        path.write_text(json.dumps(self._task_ids, indent=2) + "\n", encoding="utf-8")  # dict {id: path}
 
     def _save_poc_scripts(self):
         if not self.benchmark_path:
@@ -258,7 +258,7 @@ class AuditPipeline:
             return completed
 
         try:
-            state = json.loads(state_path.read_text())
+            state = json.loads(state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return completed
 
@@ -291,7 +291,7 @@ class AuditPipeline:
         findings_path = self.jacks_dir / "findings.json"
         if findings_path.exists():
             try:
-                for obj in json.loads(findings_path.read_text()):
+                for obj in json.loads(findings_path.read_text(encoding="utf-8")):
                     self.findings.append(Finding(**obj))
             except (json.JSONDecodeError, OSError, TypeError):
                 pass
@@ -299,14 +299,14 @@ class AuditPipeline:
         tr_path = self.jacks_dir / "task_results.json"
         if tr_path.exists():
             try:
-                self._task_results = json.loads(tr_path.read_text())
+                self._task_results = json.loads(tr_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
 
         tid_path = self.jacks_dir / "task_ids.json"
         if tid_path.exists():
             try:
-                loaded = json.loads(tid_path.read_text())
+                loaded = json.loads(tid_path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     self._task_ids = {str(k): str(v) for k, v in loaded.items()}
                 elif isinstance(loaded, list):
@@ -328,7 +328,7 @@ class AuditPipeline:
             self.results[phase_id] = PhaseResult(
                 phase=phase_id,
                 status="completed",
-                output=summary_path.read_text(),
+                output=summary_path.read_text(encoding="utf-8"),
                 duration=meta.get("duration", 0),
                 summary=meta.get("summary", ""),
                 findings=list(self.findings) if phase_id == "vuln_scan" else [],
@@ -353,7 +353,7 @@ class AuditPipeline:
         # Fall back to the summary text if the log is missing.
         log_path = self.output_dir / f"{phase_id}.log"
         if log_path.exists():
-            log_content = log_path.read_text()
+            log_content = log_path.read_text(encoding="utf-8")
             for log_data in _parse_log_events(log_content, phase_id):
                 await self.emit("log", log_data)
         elif r.output:
@@ -370,7 +370,7 @@ class AuditPipeline:
         # Summary view: emit the .md file as a dedicated phase_summary event.
         summary_path = self.jacks_dir / "summary" / f"{phase_id}.md"
         if summary_path.exists():
-            summary_text = summary_path.read_text()
+            summary_text = summary_path.read_text(encoding="utf-8")
             if summary_text.strip():
                 await self.emit("phase_summary", {"phase": phase_id, "text": summary_text})
         elif r.output:

@@ -43,6 +43,29 @@ export async function startHack(target) {
   connectSSE(result.run_id);
 }
 
+export async function startRefine(target) {
+  resetUIState("refine");
+  updateScoreboardEmpty("Refining benchmark…");
+
+  const resp = await fetch("/api/refine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target,
+      backend: state.backend,
+      use_sandbox: state.useSandbox,
+      max_rounds: state.refineMaxRounds,
+    }),
+  });
+  const result = await resp.json();
+  if (result.error) {
+    alert(`Error: ${result.error}`);
+    setRunning(false);
+    return;
+  }
+  connectSSE(result.run_id);
+}
+
 export async function cancelAudit() {
   await fetch("/api/cancel", {
     method: "POST",
@@ -57,6 +80,10 @@ export async function cancelAudit() {
 export async function continueRun() {
   const target = els.targetInput.value.trim();
   if (!target) return;
+  if (state.mode === "refine") {
+    await startRefine(target);
+    return;
+  }
 
   resetUIState("audit");
   updateScoreboardEmpty("Continuing audit\u2026");

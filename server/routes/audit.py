@@ -16,7 +16,15 @@ from .. import run_state
 from ..ai_runner import AIRunner
 from ..constants import TOOLS_DIR
 from ..event_bus import EventBus
-from ..pipeline import PHASES, AuditPipeline, HackPipeline, _derive_benchmark_name
+from ..pipeline import (
+    MAX_REFINE_ROUNDS,
+    PHASES,
+    AuditPipeline,
+    HackPipeline,
+    RefinePipeline,
+    _derive_benchmark_name,
+    clamp_refine_rounds,
+)
 from ..sandbox import Sandbox
 
 router = APIRouter()
@@ -141,6 +149,48 @@ async def start_hack(request: Request):
     return {"status": "started", "target": target, "run_id": run_id}
 
 
+@router.post("/refine")
+async def start_refine(request: Request):
+    body = await request.json()
+    target = body.get("target", "").strip()
+    backend = body.get("backend", "")
+    use_sandbox = body.get("use_sandbox", None)
+    max_rounds_raw = body.get("max_rounds", None)
+    max_rounds = clamp_refine_rounds(max_rounds_raw)
+
+    if max_rounds_raw is not None:
+        try:
+            requested_rounds = int(max_rounds_raw)
+        except (TypeError, ValueError):
+            return {"error": "max_rounds must be a number"}
+        if requested_rounds < 1 or requested_rounds > MAX_REFINE_ROUNDS:
+            return {"error": f"max_rounds must be between 1 and {MAX_REFINE_ROUNDS}"}
+
+    if not target:
+        return {"error": "target is required"}
+
+    run_id = "refine_" + _derive_benchmark_name(target)
+
+    if run_state.run_is_active(run_id):
+        return {"error": f"A refine run for '{target}' is already running. Cancel it first."}
+
+    _cleanup_old(run_id)
+    sandbox, ai, bus, emit = _make_run_components(backend, use_sandbox)
+
+    pipeline = RefinePipeline(
+        target=target, emit=emit, ai=ai, sandbox=sandbox,
+        max_rounds=max_rounds,
+    )
+    task = asyncio.create_task(_run_with_error_guard(pipeline, bus))
+
+    run_state.active_runs[run_id] = {
+        "bus": bus, "pipeline": pipeline, "sandbox": sandbox,
+        "task": task, "target": target, "mode": "refine", "backend": ai.backend,
+        "max_rounds": max_rounds,
+    }
+    return {"status": "started", "target": target, "run_id": run_id, "max_rounds": max_rounds}
+
+
 @router.post("/rerun")
 async def rerun_from_phase(request: Request):
     body = await request.json()
@@ -166,7 +216,7 @@ async def rerun_from_phase(request: Request):
         if not state_path.exists():
             return {"error": f"Run '{run_id}' not found"}
         try:
-            saved = json.loads(state_path.read_text())
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
             target = saved.get("target", "")
             if not backend:
                 backend = saved.get("backend", "")

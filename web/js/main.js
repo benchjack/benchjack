@@ -3,10 +3,13 @@
 // ================================================================
 
 import { $, $$, state, els } from "./state.js";
-import { setView, switchTab, setMainView, resetUIState, updateActionButtons } from "./ui.js";
+import {
+  setView, switchTab, setMainView, resetUIState, updateActionButtons,
+  setRefineRounds,
+} from "./ui.js";
 import { refilterFindings } from "./findings.js";
 import { showTooltip, showTaskTooltip, showHackedTooltip, hideTooltip } from "./scoreboard.js";
-import { startAudit, startHack, cancelAudit, rerunFromPhase, continueRun } from "./api.js";
+import { startAudit, startHack, startRefine, cancelAudit, rerunFromPhase, continueRun } from "./api.js";
 import { toggleRunsPanel, closeRunsPanel } from "./runs.js";
 
 
@@ -31,6 +34,34 @@ els.backendBtn.addEventListener("click", () => {
 
 els.sandboxBtn.addEventListener("click", () => {
   setSandbox(state.useSandbox ? "nosandbox" : "sandbox");
+});
+
+setRefineRounds(state.refineMaxRounds);
+
+els.refineMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = els.refineMenu.hidden;
+  els.refineMenu.hidden = !open;
+  els.refineMenuBtn.classList.toggle("active", open);
+});
+
+els.refineMenu.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const option = e.target.closest(".refine-round-option");
+  if (option) {
+    setRefineRounds(option.dataset.rounds);
+    els.refineMenu.hidden = true;
+    els.refineMenuBtn.classList.remove("active");
+  }
+});
+
+els.refineRoundsInput.addEventListener("input", () => {
+  setRefineRounds(els.refineRoundsInput.value);
+});
+
+document.addEventListener("click", () => {
+  els.refineMenu.hidden = true;
+  els.refineMenuBtn.classList.remove("active");
 });
 
 // ---- Restart-phase selection (progress bar click) ----
@@ -156,6 +187,12 @@ els.hackBtn.addEventListener("click", () => {
   const target = els.targetInput.value.trim();
   if (!target) return;
   startHack(target);
+});
+
+els.refineBtn.addEventListener("click", () => {
+  const target = els.targetInput.value.trim();
+  if (!target) return;
+  startRefine(target);
 });
 
 els.continueBtn.addEventListener("click", () => {

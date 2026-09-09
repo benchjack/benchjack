@@ -17,6 +17,7 @@ Options:
     --no-ui            Run in pure CLI mode (no web server)
     --audit            Run the audit pipeline in CLI mode
     --hack-it          Run the reward-hack pipeline in CLI mode
+    --refine-it        Run the iterative refinement pipeline in CLI mode
     --sandbox          Require Docker sandboxing in CLI mode
     --no-sandbox       Run directly on the host
 
@@ -26,6 +27,7 @@ Examples:
     python benchjack.py princeton-nlp/SWE-bench --backend claude
     python benchjack.py ./my-bench --no-ui
     python benchjack.py ./my-bench --no-ui --hack-it --backend codex --sandbox
+    python benchjack.py ./my-bench --no-ui --refine-it --no-sandbox
 """
 
 import argparse
@@ -41,12 +43,19 @@ TOOLS_DIR = (
 )
 
 
+def _configure_stdio():
+    """Avoid Windows cp1252 crashes when CLI output is redirected."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 # ---- CLI (--no-ui) mode ----
 
-async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"):
+async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial", refine_rounds=3):
     """Run the requested pipeline in CLI mode — no web server."""
     from server.ai_runner import AIRunner
-    from server.pipeline import AuditPipeline, HackPipeline
+    from server.pipeline import AuditPipeline, HackPipeline, RefinePipeline
     from server.sandbox import Sandbox
 
     sandbox = Sandbox(str(TOOLS_DIR), enabled=use_sandbox)
@@ -107,11 +116,41 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
             fc = data.get("findings_count", 0)
             print(f"\n  -- {data['phase']} complete ({dur}s, {fc} finding(s)) --")
 
+        elif event_type == "refine_round_complete":
+            _clear_status()
+            rn = data.get("round", "?")
+            rate = data.get("hack_rate")
+            hacked = data.get("hacked", 0)
+            total_t = data.get("total", 0)
+            if data.get("converged"):
+                print(f"\n  >> Round {rn}: CONVERGED — benchmark defended (0% hacked)")
+            elif total_t is None:
+                count = f"{hacked} confirmed hacked task(s)" if hacked is not None else "Benchmark-wide exploit confirmed"
+                print(f"\n  >> Round {rn} complete: {count}; total task count unknown")
+            else:
+                pct = round(rate * 100, 1)
+                print(f"\n  >> Round {rn} complete: {pct}% hacked ({hacked}/{total_t} tasks)")
+
+        elif event_type == "refine_complete":
+            _clear_status()
+            if data.get("converged"):
+                print("\n  >> Refinement converged — exploit patched successfully")
+            elif data.get("stop_reason") == "cannot_patch":
+                print("\n  >> Refinement stopped — defender cannot patch without redesign; see CANNOT_PATCH.md")
+            else:
+                rate = data.get("final_hack_rate")
+                score = f"{round(rate * 100, 1)}%" if rate is not None else "hack rate unknown"
+                rounds = data.get("max_rounds", refine_rounds)
+                print(f"\n  >> Refinement complete - benchmark still hackable ({score} after {rounds} rounds)")
+
         elif event_type == "audit_complete":
             _clear_status()
             print(f"\n{'=' * 60}")
             if mode == "hack":
                 print(f"  Hack run complete")
+                print(f"  Results: {data.get('jacks_dir', '')}")
+            elif mode == "refine":
+                print(f"  Refinement complete")
                 print(f"  Results: {data.get('jacks_dir', '')}")
             else:
                 total = data.get("total_findings", 0)
@@ -128,6 +167,14 @@ async def cli_run(target, backend, model, mode, use_sandbox, poc_level="partial"
             emit=emit,
             ai=ai,
             sandbox=sandbox,
+        )
+    elif mode == "refine":
+        pipeline = RefinePipeline(
+            target=target,
+            emit=emit,
+            ai=ai,
+            sandbox=sandbox,
+            max_rounds=refine_rounds,
         )
     else:
         pipeline = AuditPipeline(
@@ -219,6 +266,8 @@ def preflight_checks(backend: str, use_sandbox: bool) -> list[str]:
 
 
 def main():
+    _configure_stdio()
+
     parser = argparse.ArgumentParser(
         prog="benchjack",
         description="BenchJack — AI Agent Benchmark Hackability Scanner",
@@ -276,6 +325,17 @@ def main():
         action="store_true",
         help="Run the reward-hack pipeline in CLI mode",
     )
+    mode_group.add_argument(
+        "--refine-it",
+        action="store_true",
+        help="Run iterative refinement in CLI mode (default: 3 attacks with up to 2 patches)",
+    )
+    parser.add_argument(
+        "--refine-rounds",
+        type=int,
+        default=3,
+        help="Attack passes for --refine-it, with patches between passes (default: 3, max: 10)",
+    )
     args = parser.parse_args()
 
     # ---- Guard: pipeline flags are CLI-only ----
@@ -286,6 +346,8 @@ def main():
             "--poc-level": args.poc_level != parser.get_default("poc_level"),
             "--audit": args.audit,
             "--hack-it": args.hack_it,
+            "--refine-it": args.refine_it,
+            "--refine-rounds": args.refine_rounds != parser.get_default("refine_rounds"),
             "--sandbox": args.sandbox,
             "--no-sandbox": args.no_sandbox,
         }
@@ -303,7 +365,7 @@ def main():
             parser.error("--no-ui requires TARGET")
 
         target = args.target
-        mode = "hack" if args.hack_it else "audit"
+        mode = "hack" if args.hack_it else "refine" if args.refine_it else "audit"
         use_sandbox = args.sandbox
         sandbox_label = "on" if use_sandbox else "off"
         print(f"BenchJack (CLI mode)")
@@ -327,6 +389,7 @@ def main():
             mode=mode,
             use_sandbox=use_sandbox,
             poc_level=args.poc_level,
+            refine_rounds=args.refine_rounds,
         ))
         return
 

@@ -65,6 +65,35 @@ def _extract_claude_credentials() -> dict | None:
         return None
 
 
+def _ignore_transient_auth_files(_dir: str, names: list[str]) -> set[str]:
+    """Skip transient or bulky auth-adjacent files while copying CLI homes."""
+    bulky_dirs = {
+        "vendor_imports",
+        "plugins",
+        "skills",
+        "memories",
+        "sessions",
+        "projects",
+        "logs",
+        "tmp",
+        "cache",
+        "__pycache__",
+    }
+    return {
+        name for name in names
+        if name in bulky_dirs or name.endswith((".sqlite-shm", ".sqlite-wal"))
+    }
+
+
+def _docker_user_args() -> list[str]:
+    """Return Docker --user args on POSIX hosts; omit them on Windows."""
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if not getuid or not getgid:
+        return []
+    return ["--user", f"{getuid()}:{getgid()}"]
+
+
 class Sandbox:
     """Docker sandbox for benchmark analysis.
 
@@ -268,7 +297,7 @@ class Sandbox:
         args += [
             "-v", f"{self._claude_dir}:/home/user",
             "-e", "HOME=/home/user",
-            "--user", f"{_host_uid()}:{_host_gid()}",
+            *_docker_user_args(),
             IMAGE_TAG,
             "sleep", "infinity",
         ]
@@ -347,6 +376,7 @@ class Sandbox:
         shell_cmd: str,
         *,
         stdin_data: str | None = None,
+        cwd: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Run *shell_cmd* in an AI-profile container (network enabled).
 
@@ -358,7 +388,9 @@ class Sandbox:
         Falls back to host subprocess when Docker is unavailable.
         """
         if not self.enabled:
-            async for line in self._host_stream_shell(shell_cmd, stdin_data=stdin_data):
+            async for line in self._host_stream_shell(
+                shell_cmd, cwd=cwd, stdin_data=stdin_data,
+            ):
                 yield line
             return
 
@@ -369,12 +401,16 @@ class Sandbox:
 
         if self._container_id:
             # Post-setup: exec into the persistent container
-            docker_cmd = ["docker", "exec", "-i", self._container_id, "sh", "-c", shell_cmd]
+            docker_cmd = ["docker", "exec", "-i"]
+            if cwd:
+                docker_cmd += ["-w", cwd]
+            docker_cmd += [self._container_id, "sh", "-c", shell_cmd]
         else:
             # Setup phase or restart failed: ephemeral container
-            docker_cmd = self._base_docker_args(network=True, ai=True) + [
-                "sh", "-c", shell_cmd,
-            ]
+            base_cmd = self._base_docker_args(network=True, ai=True)
+            if cwd:
+                base_cmd = base_cmd[:-1] + ["-w", cwd] + base_cmd[-1:]
+            docker_cmd = base_cmd + ["sh", "-c", shell_cmd]
 
         proc = await asyncio.create_subprocess_exec(
             *docker_cmd,
@@ -395,6 +431,8 @@ class Sandbox:
             yield raw.decode(errors="replace").rstrip("\n")
 
         await proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Sandbox AI command exited with code {proc.returncode}")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -437,7 +475,8 @@ class Sandbox:
         if claude_dir.is_dir():
             shutil.copytree(
                 str(claude_dir), dot_claude_dest,
-                dirs_exist_ok=True, ignore_dangling_symlinks=True,
+                dirs_exist_ok=True, ignore=_ignore_transient_auth_files,
+                ignore_dangling_symlinks=True,
                 copy_function=shutil.copy2,
             )
         else:
@@ -470,7 +509,8 @@ class Sandbox:
         if codex_dir.is_dir():
             shutil.copytree(
                 str(codex_dir), os.path.join(self._claude_dir, ".codex"),
-                dirs_exist_ok=True, ignore_dangling_symlinks=True,
+                dirs_exist_ok=True, ignore=_ignore_transient_auth_files,
+                ignore_dangling_symlinks=True,
                 copy_function=shutil.copy2,
             )
 
@@ -570,6 +610,12 @@ class Sandbox:
         else:
             args += ["--cap-add", "NET_RAW", "--cap-add", "NET_BIND_SERVICE"]
         if ai:
+            # Defender phases also need evidence when the persistent container
+            # is unavailable and an ephemeral AI container is used.
+            if self._output_dir:
+                args += ["-v", f"{self._output_dir}:/output"]
+            if self._jacks_dir:
+                args += ["-v", f"{self._jacks_dir}:/hacks"]
             # Prefer explicit ANTHROPIC_API_KEY from the environment (stable);
             # only fall back to the short-lived OAuth access token from Keychain.
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -584,7 +630,7 @@ class Sandbox:
             args += [
                 "-v", f"{self._claude_dir}:/home/user",
                 "-e", "HOME=/home/user",
-                "--user", f"{_host_uid()}:{_host_gid()}",
+                *_docker_user_args(),
                 "-i",
             ]
         args.append(IMAGE_TAG)

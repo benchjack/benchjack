@@ -12,7 +12,7 @@ from fastapi import APIRouter
 
 from .. import run_state
 from ..event_bus import EventBus
-from ..pipeline import PHASES, HACK_PHASES
+from ..pipeline import PHASES, HACK_PHASES, clamp_refine_rounds, refine_phases
 from ..pipeline.utils import _expand_and_split_exploit_results, _parse_log_events
 
 router = APIRouter()
@@ -30,15 +30,22 @@ async def status():
             "running": running,
             "target": entry["target"],
             "mode": entry["mode"],
+            "max_rounds": entry.get("max_rounds"),
         }
     return {"active_runs": runs_status}
 
 
-def _phase_list(mode: str) -> list[str]:
+def _phase_list(mode: str, max_rounds: int | str | None = None) -> list[str]:
     """Return the phase ID list for a given run mode."""
     if mode == "hack":
         return [pid for pid, _ in HACK_PHASES]
+    if mode == "refine":
+        return [pid for pid, _ in refine_phases(max_rounds)]
     return [pid for pid, _ in PHASES]
+
+
+def _is_terminal_status(status: str | None) -> bool:
+    return status in {"completed", "skipped"}
 
 
 @router.get("/runs")
@@ -52,16 +59,17 @@ async def list_runs():
             if not entry.is_dir() or not state_path.exists():
                 continue
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
 
             run_mode = state.get("mode", "audit")
-            phase_ids = _phase_list(run_mode)
+            max_rounds = clamp_refine_rounds(state.get("max_rounds")) if run_mode == "refine" else None
+            phase_ids = _phase_list(run_mode, max_rounds)
             phases = state.get("phases", {})
             completed_phases = [
                 pid for pid in phase_ids
-                if phases.get(pid, {}).get("status") == "completed"
+                if _is_terminal_status(phases.get(pid, {}).get("status"))
             ]
             is_finished = len(completed_phases) == len(phase_ids)
             any_failed = any(
@@ -89,7 +97,7 @@ async def list_runs():
             findings_path = entry / "findings.json"
             if findings_path.exists():
                 try:
-                    findings_count = len(json.loads(findings_path.read_text()))
+                    findings_count = len(json.loads(findings_path.read_text(encoding="utf-8")))
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -98,6 +106,7 @@ async def list_runs():
                 "target": state.get("target", entry.name),
                 "mode": run_mode,
                 "backend": state.get("backend", ""),
+                "max_rounds": max_rounds,
                 "status": run_status,
                 "completed_phases": completed_phases,
                 "total_phases": len(phase_ids),
@@ -113,14 +122,16 @@ async def list_runs():
             continue
         if entry["task"] and not entry["task"].done():
             entry_mode = entry.get("mode", "audit")
+            max_rounds = entry.get("max_rounds") if entry_mode == "refine" else None
             runs.append({
                 "name": rid,
                 "target": entry["target"],
                 "mode": entry_mode,
                 "backend": entry.get("backend", ""),
+                "max_rounds": max_rounds,
                 "status": "running",
                 "completed_phases": [],
-                "total_phases": len(_phase_list(entry_mode)),
+                "total_phases": len(_phase_list(entry_mode, max_rounds)),
                 "total_duration": 0,
                 "findings_count": 0,
                 "mtime": time.time(),
@@ -142,7 +153,7 @@ async def load_run(name: str):
         return {"error": f"Run '{name}' not found"}
 
     try:
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"error": f"Could not read state for '{name}'"}
 
@@ -150,13 +161,17 @@ async def load_run(name: str):
     target = state.get("target", name)
     run_mode = state.get("mode", "audit")
     run_backend = state.get("backend", "")
+    max_rounds = clamp_refine_rounds(state.get("max_rounds")) if run_mode == "refine" else None
     phases_meta = state.get("phases", {})
 
-    phase_list = HACK_PHASES if run_mode == "hack" else PHASES
+    phase_list = (HACK_PHASES if run_mode == "hack"
+                  else refine_phases(max_rounds) if run_mode == "refine"
+                  else PHASES)
     await bus.publish("audit_start", {
         "target": target,
         "mode": run_mode,
         "backend": run_backend,
+        "max_rounds": max_rounds,
         "restore": True,
         "phases": [{"id": pid, "label": plabel} for pid, plabel in phase_list],
     })
@@ -166,7 +181,7 @@ async def load_run(name: str):
     findings_path = _HACKS_ROOT / name / "findings.json"
     if findings_path.exists():
         try:
-            findings = json.loads(findings_path.read_text())
+            findings = json.loads(findings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -175,7 +190,7 @@ async def load_run(name: str):
     tr_path = _HACKS_ROOT / name / "task_results.json"
     if tr_path.exists():
         try:
-            task_results = json.loads(tr_path.read_text())
+            task_results = json.loads(tr_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -185,7 +200,7 @@ async def load_run(name: str):
     tid_path = _HACKS_ROOT / name / "task_ids.json"
     if tid_path.exists():
         try:
-            loaded = json.loads(tid_path.read_text())
+            loaded = json.loads(tid_path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 task_paths = {str(k): str(v) for k, v in loaded.items()}
                 task_ids = list(task_paths.keys())
@@ -200,6 +215,9 @@ async def load_run(name: str):
         phase_status = meta.get("status")
         if not phase_status or phase_status == "pending":
             continue
+        if phase_status == "skipped":
+            await bus.publish("phase_skip", {"phase": phase_id, "reason": "saved run"})
+            continue
 
         await bus.publish("phase_start", {"phase": phase_id, "label": phase_label})
 
@@ -209,13 +227,13 @@ async def load_run(name: str):
         summary_path = _HACKS_ROOT / name / "summary" / f"{phase_id}.md"
         summary_text = ""
         try:
-            summary_text = summary_path.read_text() if summary_path.exists() else ""
+            summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
         except OSError:
             pass
 
         if log_path.exists():
             try:
-                log_content = log_path.read_text()
+                log_content = log_path.read_text(encoding="utf-8")
                 for log_data in _parse_log_events(log_content, phase_id):
                     await bus.publish("log", log_data)
             except OSError:
@@ -250,14 +268,18 @@ async def load_run(name: str):
             for tr in task_results:
                 await bus.publish("task_result", tr)
 
-        if phase_id in ("poc", "verify"):
+        if phase_id in ("poc", "verify") or (
+            run_mode == "refine" and phase_id.endswith("_attack") and phase_status == "completed"
+        ):
             run_dir = str(_HACKS_ROOT / name)
-            # For hack runs, task IDs live in the corresponding audit dir.
-            task_ids_dir = (
-                str(_HACKS_ROOT / name.removeprefix("hack_"))
-                if run_mode == "hack"
-                else run_dir
-            )
+            # Refinement snapshots scope per round; hack runs use the audit map.
+            if run_mode == "hack":
+                task_ids_dir = str(_HACKS_ROOT / name.removeprefix("hack_"))
+            elif run_mode == "refine":
+                run_dir = str(_HACKS_ROOT / name / phase_id.split("_")[0])
+                task_ids_dir = run_dir
+            else:
+                task_ids_dir = run_dir
             task_results, exploit_list = _expand_and_split_exploit_results(
                 run_dir, task_ids_dir
             )
@@ -274,10 +296,31 @@ async def load_run(name: str):
             "summary": meta.get("summary", ""),
         })
 
+        if run_mode == "refine" and phase_status == "completed":
+            round_n = int(phase_id.split("_")[0][1:])
+            result = state.get("rounds", {}).get(str(round_n))
+            if result and (
+                phase_id.endswith("_patch")
+                or result.get("converged")
+                or round_n == max_rounds
+            ):
+                await bus.publish("refine_round_complete", result)
+
     all_completed = all(
-        phases_meta.get(pid, {}).get("status") == "completed"
+        _is_terminal_status(phases_meta.get(pid, {}).get("status"))
         for pid, _ in phase_list
     )
+
+    if run_mode == "refine" and all_completed:
+        await bus.publish("refine_complete", {
+            "converged": state.get("converged", any(
+                phases_meta.get(pid, {}).get("status") == "skipped"
+                for pid, _ in phase_list
+            )),
+            "final_hack_rate": state.get("final_hack_rate"),
+            "max_rounds": max_rounds,
+            **({"stop_reason": state["stop_reason"]} if state.get("stop_reason") else {}),
+        })
 
     await bus.publish("audit_complete", {
         "target": target,
@@ -285,6 +328,7 @@ async def load_run(name: str):
         "findings": findings,
         "failed": False,
         "loaded_from_history": True,
+        **({"stop_reason": state["stop_reason"]} if run_mode == "refine" and state.get("stop_reason") else {}),
     })
 
     run_state.active_runs[name] = {
@@ -295,6 +339,7 @@ async def load_run(name: str):
         "target": target,
         "mode": run_mode,
         "backend": run_backend,
+        "max_rounds": max_rounds,
     }
 
     return {

@@ -19,6 +19,9 @@ export const VULN_META = {
   V8: { name: "Excessive Permissions", desc: "Root, --privileged, unrestricted network, excessive mounts" },
 };
 
+export const DEFAULT_REFINE_ROUNDS = 3;
+export const MAX_REFINE_ROUNDS = 10;
+
 // ---- Application state ----
 export const state = {
   running: false,
@@ -28,18 +31,20 @@ export const state = {
   activeTab: "setup",
   activeView: "output",   // "output" | "summary"
   mainView: "dashboard",  // "dashboard" | "detail"
-  mode: "audit",          // "audit" | "hack"
+  mode: "audit",          // "audit" | "hack" | "refine"
 
   // Structured messages per phase (output view)
   phaseMessages: {
     setup: [], recon: [], vuln_scan: [], poc: [],
     report: [], hack: [], verify: [],
+    r1_attack: [], r1_patch: [], r2_attack: [], r2_patch: [], r3_attack: [],
   },
 
   // Last AI text per phase (summary view)
   phaseSummary: {
     setup: "", recon: "", vuln_scan: "", poc: "",
     report: "", hack: "", verify: "",
+    r1_attack: "", r1_patch: "", r2_attack: "", r2_patch: "", r3_attack: "",
   },
 
   userPickedTab: false,
@@ -64,6 +69,7 @@ export const state = {
 
   backend: "claude",     // "codex" | "claude"
   useSandbox: false,
+  refineMaxRounds: DEFAULT_REFINE_ROUNDS,
 };
 
 // ---- DOM element cache ----
@@ -71,10 +77,16 @@ export const els = {
   form:            $("#audit-form"),
   targetInput:     $("#target-input"),
   startBtn:        $("#start-btn"),
-  hackBtn:         $("#hack-btn"),
-  cancelBtn:       $("#cancel-btn"),
-  progressBar:     $("#progress-bar"),
-  hackProgressBar: $("#hack-progress-bar"),
+  hackBtn:          $("#hack-btn"),
+  refineBtn:        $("#refine-btn"),
+  refineControl:    $("#refine-control"),
+  refineMenuBtn:    $("#refine-menu-btn"),
+  refineMenu:       $("#refine-menu"),
+  refineRoundsInput: $("#refine-rounds-input"),
+  cancelBtn:        $("#cancel-btn"),
+  progressBar:      $("#progress-bar"),
+  hackProgressBar:  $("#hack-progress-bar"),
+  refineProgressBar: $("#refine-progress-bar"),
   statusBadge:     $("#status-badge"),
   autoscroll:      $("#autoscroll"),
   findingsList:    $("#findings-list"),

@@ -46,6 +46,17 @@
       <button type="button" id="sandbox-btn" class="cycle-btn" data-state="nosandbox">no sandbox</button>
       <button id="start-btn" type="submit">Start Audit</button>
       <button id="hack-btn" type="button" class="btn-hack">Just Hack It!</button>
+      <div id="refine-control" class="refine-control">
+        <button id="refine-btn" type="button" class="btn-refine">~ Refine</button>
+        <button id="refine-menu-btn" type="button" class="btn-refine-menu" aria-label="Refine options">...</button>
+        <div id="refine-menu" class="refine-menu" hidden>
+          <button type="button" class="refine-round-option active" data-rounds="3">Default: 3 attacks, 2 patches</button>
+          <label class="refine-round-custom">
+            <span>Attack passes</span>
+            <input id="refine-rounds-input" type="number" min="1" max="10" value="3">
+          </label>
+        </div>
+      </div>
       <button id="continue-btn" type="button" class="btn-continue" style="display:none">Continue</button>
       <button id="cancel-btn" type="button" class="btn-cancel" style="display:none">Cancel</button>
     </form>
@@ -86,6 +97,25 @@
         <div class="progress-segment pending" data-phase="verify">
           <div class="segment-fill"></div>
           <span class="segment-label">Verify &amp; Improve</span>
+        </div>
+      </div>
+      <!-- Refine mode progress bar -->
+      <div id="refine-progress-bar" class="progress-bar-inner" style="display:none">
+        <div class="progress-segment pending" data-phase="r1">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Round 1</span>
+        </div>
+        <div class="progress-segment pending" data-phase="r2">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Round 2</span>
+        </div>
+        <div class="progress-segment pending" data-phase="r3">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Round 3</span>
+        </div>
+        <div class="progress-segment pending" data-phase="converged">
+          <div class="segment-fill"></div>
+          <span class="segment-label">Result</span>
         </div>
       </div>
     </div>
@@ -184,6 +214,36 @@
       <span class="phase-label">Verify &amp; Improve</span>
       <span class="phase-time"></span>
     </div>
+    <!-- Refine phases (hidden in audit/hack mode) -->
+    <div class="phase pending" data-phase="r1_attack" data-mode="refine" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">R1 Attack</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="refine" style="display:none"></div>
+    <div class="phase pending" data-phase="r1_patch" data-mode="refine" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">R1 Patch</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="refine" style="display:none"></div>
+    <div class="phase pending" data-phase="r2_attack" data-mode="refine" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">R2 Attack</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="refine" style="display:none"></div>
+    <div class="phase pending" data-phase="r2_patch" data-mode="refine" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">R2 Patch</span>
+      <span class="phase-time"></span>
+    </div>
+    <div class="phase-connector" data-mode="refine" style="display:none"></div>
+    <div class="phase pending" data-phase="r3_attack" data-mode="refine" style="display:none">
+      <div class="phase-dot"></div>
+      <span class="phase-label">R3 Attack</span>
+      <span class="phase-time"></span>
+    </div>
   </section>
 
   <!-- Main content area -->
@@ -200,6 +260,11 @@
           <button class="phase-tab" data-tab="report">Report</button>
           <button class="phase-tab hack-tab" data-tab="hack" style="display:none">Hack</button>
           <button class="phase-tab hack-tab" data-tab="verify" style="display:none">Verify</button>
+          <button class="phase-tab refine-tab" data-tab="r1_attack" style="display:none">R1 Attack</button>
+          <button class="phase-tab refine-tab" data-tab="r1_patch" style="display:none">R1 Patch</button>
+          <button class="phase-tab refine-tab" data-tab="r2_attack" style="display:none">R2 Attack</button>
+          <button class="phase-tab refine-tab" data-tab="r2_patch" style="display:none">R2 Patch</button>
+          <button class="phase-tab refine-tab" data-tab="r3_attack" style="display:none">R3 Attack</button>
         </div>
         <div class="view-controls">
           <div class="view-toggle" id="view-toggle">
@@ -253,6 +318,36 @@
         <div class="phase-output" data-phase="verify"></div>
         <div class="phase-summary" data-phase="verify">
           <div class="phase-markdown" data-phase="verify"></div>
+        </div>
+      </div>
+      <div id="tab-r1_attack" class="tab-pane">
+        <div class="phase-output" data-phase="r1_attack"></div>
+        <div class="phase-summary" data-phase="r1_attack">
+          <div class="phase-markdown" data-phase="r1_attack"></div>
+        </div>
+      </div>
+      <div id="tab-r1_patch" class="tab-pane">
+        <div class="phase-output" data-phase="r1_patch"></div>
+        <div class="phase-summary" data-phase="r1_patch">
+          <div class="phase-markdown" data-phase="r1_patch"></div>
+        </div>
+      </div>
+      <div id="tab-r2_attack" class="tab-pane">
+        <div class="phase-output" data-phase="r2_attack"></div>
+        <div class="phase-summary" data-phase="r2_attack">
+          <div class="phase-markdown" data-phase="r2_attack"></div>
+        </div>
+      </div>
+      <div id="tab-r2_patch" class="tab-pane">
+        <div class="phase-output" data-phase="r2_patch"></div>
+        <div class="phase-summary" data-phase="r2_patch">
+          <div class="phase-markdown" data-phase="r2_patch"></div>
+        </div>
+      </div>
+      <div id="tab-r3_attack" class="tab-pane">
+        <div class="phase-output" data-phase="r3_attack"></div>
+        <div class="phase-summary" data-phase="r3_attack">
+          <div class="phase-markdown" data-phase="r3_attack"></div>
         </div>
       </div>
     </section>

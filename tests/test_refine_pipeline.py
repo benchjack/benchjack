@@ -532,3 +532,26 @@ async def test_refine_replays_exploits_and_metrics_for_each_round(tmp_path, monk
     assert [e["data"]["phase"] for e in history if e["type"] == "phase_start"] == [
         "r1_attack", "r1_patch", "r2_attack",
     ]
+
+
+@pytest.mark.asyncio
+async def test_refine_new_run_archives_previous_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+
+    async def emit(kind, data):
+        pass
+
+    first = RefinePipeline("demo", emit, AlwaysHackAI(), Sandbox(str(tmp_path), enabled=False))
+    await first.run()
+    assert (first.round_dir(3) / "exploit_result.jsonl").exists()
+    second = RefinePipeline("demo", emit, FakeAI(), Sandbox(str(tmp_path), enabled=False), max_rounds=1)
+    await second.run()
+    state = json.loads((second.jacks_dir / "state.json").read_text(encoding="utf-8"))
+    assert set(state["phases"]) == {"r1_attack"}
+    assert set(state["rounds"]) == {"1"}
+    assert not (second.round_dir(3) / "exploit_result.jsonl").exists()
+    assert not (second.jacks_dir / "summary" / "r3_attack.md").exists()
+    assert not (second.output_dir / "r3_attack.log").exists()
+    archived = list((tmp_path / "hacks-archive" / "refine_demo").glob("*/hacks/r3/exploit_result.jsonl"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text(encoding="utf-8"))["hacked"] is True

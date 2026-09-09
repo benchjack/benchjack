@@ -12,6 +12,7 @@ import os
 import shutil
 import stat
 import time
+import uuid
 from pathlib import Path
 
 from ..ai_runner import AIRunner
@@ -55,6 +56,7 @@ class RefinePipeline:
     # ------------------------------------------------------------------
 
     async def run(self):
+        self._archive_previous_run()
         self._ensure_dirs()
 
         self.benchmark_path = str(self.output_dir / "repo")
@@ -100,6 +102,25 @@ class RefinePipeline:
 
     def round_dir(self, n: int) -> Path:
         return self.jacks_dir / f"r{n}"
+
+    def _archive_previous_run(self):
+        """Preserve previous evidence while starting with fresh run state."""
+        root = _PROJECT_ROOT.resolve()
+        sources = [(self.output_dir, "output"), (self.jacks_dir, "hacks")]
+        existing = [(path, name) for path, name in sources if path.exists()]
+        if not existing:
+            return
+        for path, name in existing:
+            if path.resolve().parent != root / name:
+                raise RuntimeError(f"Refusing to archive unexpected run directory: {path}")
+            if os.path.isdir(self.target) and Path(self.target).resolve().is_relative_to(path.resolve()):
+                raise RuntimeError("Copy the benchmark outside this run's output before restarting it")
+        archive = root / "hacks-archive" / self._benchmark_name / uuid.uuid4().hex
+        if not archive.resolve().is_relative_to(root):
+            raise RuntimeError(f"Refusing to archive outside the project: {archive}")
+        archive.mkdir(parents=True, exist_ok=False)
+        for path, name in existing:
+            path.rename(archive / name)
 
     def _ensure_dirs(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)

@@ -126,6 +126,13 @@ export function handleEvent(event) {
         if (data.phase.endsWith("_attack")) {
           state.exploitedTasks = new Set();
           state.exploitResults = {};
+          state.tasks = Object.fromEntries(
+            Object.keys(state.tasks).filter((id) => id !== "all_tasks").map((id) => [id, {}]),
+          );
+          state.vulnClasses = {};
+          resetVulnHeaders();
+          renderScoreboard();
+          updateScoreboardEmpty("Checking current round…");
         }
       }
       break;

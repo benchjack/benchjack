@@ -505,3 +505,30 @@ async def test_refine_completion_survives_reload(tmp_path, monkeypatch, rounds, 
     assert state["converged"] == completed["converged"]
     assert state["final_hack_rate"] == completed["final_hack_rate"]
     assert list(state["rounds"].values()) == [e["data"] for e in live if e["type"] == "refine_round_complete"]
+
+
+@pytest.mark.asyncio
+async def test_refine_replays_exploits_and_metrics_for_each_round(tmp_path, monkeypatch):
+    from server import run_state
+    from server.routes import runs as runs_module
+
+    monkeypatch.setattr(refine_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runs_module, "_HACKS_ROOT", tmp_path / "hacks")
+    monkeypatch.setattr(runs_module, "_OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(run_state, "active_runs", {})
+    live = []
+
+    async def emit(kind, data):
+        live.append({"type": kind, "data": data})
+
+    pipeline = RefinePipeline("demo", emit, LoopAI(), Sandbox(str(tmp_path), enabled=False))
+    await pipeline.run()
+    await runs_module.load_run("refine_demo")
+    history = run_state.active_runs["refine_demo"]["bus"]._history
+    for event_type in ("task_result", "exploit_results", "refine_round_complete"):
+        assert [e["data"] for e in history if e["type"] == event_type] == [
+            e["data"] for e in live if e["type"] == event_type
+        ]
+    assert [e["data"]["phase"] for e in history if e["type"] == "phase_start"] == [
+        "r1_attack", "r1_patch", "r2_attack",
+    ]

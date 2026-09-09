@@ -215,6 +215,9 @@ async def load_run(name: str):
         phase_status = meta.get("status")
         if not phase_status or phase_status == "pending":
             continue
+        if phase_status == "skipped":
+            await bus.publish("phase_skip", {"phase": phase_id, "reason": "saved run"})
+            continue
 
         await bus.publish("phase_start", {"phase": phase_id, "label": phase_label})
 
@@ -266,7 +269,7 @@ async def load_run(name: str):
                 await bus.publish("task_result", tr)
 
         if phase_id in ("poc", "verify") or (
-            run_mode == "refine" and phase_id.endswith("_attack")
+            run_mode == "refine" and phase_id.endswith("_attack") and phase_status == "completed"
         ):
             run_dir = str(_HACKS_ROOT / name)
             # For hack/refine runs, task IDs live in the corresponding audit dir.
@@ -274,6 +277,7 @@ async def load_run(name: str):
                 task_ids_dir = str(_HACKS_ROOT / name.removeprefix("hack_"))
             elif run_mode == "refine":
                 task_ids_dir = str(_HACKS_ROOT / name.removeprefix("refine_"))
+                run_dir = str(_HACKS_ROOT / name / phase_id.split("_")[0])
             else:
                 task_ids_dir = run_dir
             task_results, exploit_list = _expand_and_split_exploit_results(
@@ -291,6 +295,16 @@ async def load_run(name: str):
             "findings_count": len(findings) if phase_id == "vuln_scan" else 0,
             "summary": meta.get("summary", ""),
         })
+
+        if run_mode == "refine" and phase_status == "completed":
+            round_n = int(phase_id.split("_")[0][1:])
+            result = state.get("rounds", {}).get(str(round_n))
+            if result and (
+                phase_id.endswith("_patch")
+                or result.get("converged")
+                or round_n == max_rounds
+            ):
+                await bus.publish("refine_round_complete", result)
 
     all_completed = all(
         _is_terminal_status(phases_meta.get(pid, {}).get("status"))

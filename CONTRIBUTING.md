@@ -41,6 +41,18 @@ benchjack ./path/to/benchmark --no-ui --sandbox
 
 The web server runs on port 7832 by default (`--port` to change). In web UI mode, the dashboard streams results in real time via SSE.
 
+## Running Tests
+
+```bash
+# Install the test dependencies (pytest, pytest-asyncio, httpx)
+uv pip install -e ".[test]"
+
+# Run the unit tests
+pytest
+```
+
+The unit tests need no Docker, AI backend, static analysis tools, or network access, and finish in a few seconds. CI runs them on Python 3.11, 3.12, and 3.13 for every pull request and every push to `main` (see `.github/workflows/tests.yml`).
+
 ## Project Structure
 
 ```
@@ -66,6 +78,7 @@ web/
   style.css               Styles
   app.js                  Legacy frontend entry (being split into modules)
   js/                     Frontend JS modules (state, ui, handlers, etc.)
+tests/                    Unit tests (pytest)
 .claude/skills/benchjack/
   tools/                  Static analysis tool scripts (semgrep rules, bandit, hadolint, etc.)
 Dockerfile.sandbox        Container image for sandboxed execution
@@ -84,7 +97,7 @@ Dockerfile.sandbox        Container image for sandboxed execution
    - Static analysis tools live in `.claude/skills/benchjack/tools/`. These are shell/Python scripts invoked by the pipeline inside or outside Docker.
    - Vulnerability classes are V1–V8 (defined in `server/pipeline/prompts.py` and `.claude/skills/benchjack/SKILL.md`).
 
-3. **Test your changes locally.** Run BenchJack against a small benchmark repo and verify:
+3. **Test your changes locally.** Run the unit tests (`pytest`), then run BenchJack against a small benchmark repo and verify:
    - The web UI renders correctly and streams events.
    - CLI mode produces expected output.
    - If you changed static analysis tools, verify they run in both host and sandboxed modes.

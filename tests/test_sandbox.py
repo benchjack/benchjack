@@ -113,14 +113,14 @@ class TestNetworkCapArgs:
 
 class TestLivenessCheck:
     def test_is_alive_returns_false_when_no_container(self, sandbox):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             sandbox._is_container_alive()
         )
         assert result is False
 
     def test_install_extras_noop_when_no_container(self, sandbox):
         # Should return without error when container_id is None
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             sandbox.install_extras(["jq"])
         )
 
@@ -129,7 +129,7 @@ class TestLivenessCheck:
         tools.mkdir()
         sb = Sandbox(str(tools), enabled=False)
         sb._container_id = "fake-id"
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             sb.install_extras([])
         )
         sb._container_id = None
@@ -151,7 +151,7 @@ class TestCredentialRefresh:
             sb.cleanup()
             assert sb._refresh_task is None
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
     def test_refresh_loop_exits_when_container_gone(self, tmp_path):
         tools = tmp_path / "tools"
@@ -183,5 +183,5 @@ class TestCredentialRefresh:
             assert data["claudeAiOauth"]["accessToken"].startswith("tok-")
             assert len(cred_calls) >= 1
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
         sb.cleanup()
